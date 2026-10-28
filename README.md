@@ -1,5 +1,5 @@
-# AI Accessibility Assistant
-**7th Semester Major Project — Real-Time Visual Assistance for the Visually Impaired**
+# Accessibility Assistant for Visually and Hearing Impaired People
+**7th Semester Major Project — Real-Time AI Assistance for the Visually and Hearing Impaired**
 
 ---
 
@@ -109,4 +109,4 @@ npm run dev
 ---
 
 ## Repository
-GitHub: https://github.com/JASSIJAWA/ai-accessibility-assistant
+GitHub: https://github.com/JASSIJAWA/Accessibility-Assistant-for-Visually-and-Hearing-Impaired-People
