@@ -1,5 +1,5 @@
 # Accessibility Assistant for Visually and Hearing Impaired People
-**7th Semester Major Project — Real-Time AI Assistance for the Visually and Hearing Impaired**
+**7th Semester Capstone Project — Real-Time AI Assistance for the Visually and Hearing Impaired**
 
 ---
 
