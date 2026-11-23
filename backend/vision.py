@@ -254,15 +254,28 @@ def build_scene_narration(objects: list, emotions: list) -> dict:
     }
 
 
-def detect_emotions(frame: np.ndarray) -> list:
-    """Detect faces and their emotions using DeepFace."""
+# Emotion throttle state
+_last_emotion_time = 0.0
+_cached_emotions = []
+
+def detect_emotions(frame: np.ndarray, has_person: bool = True) -> list:
+    """
+    Detect faces and emotions using DeepFace.
+    Optimized: only runs if a person is present, throttled to once every 3s.
+    """
+    global _last_emotion_time, _cached_emotions
+
+    if not has_person:
+        return []
+
+    now = time.time()
+    if now - _last_emotion_time < 3.0:
+        return _cached_emotions
+
+    _last_emotion_time = now
+
     try:
         DeepFace = get_deepface()
-    except Exception as e:
-        # DeepFace may fail due to protobuf/tensorflow conflicts — don't crash pipeline
-        print(f"⚠️ DeepFace unavailable: {e}", flush=True)
-        return []
-    try:
         results = DeepFace.analyze(
             frame,
             actions=["emotion"],
@@ -288,14 +301,11 @@ def detect_emotions(frame: np.ndarray) -> list:
                 }
             })
 
+        _cached_emotions = emotions
         return emotions
-    except ValueError as e:
-        if "Face could not be detected" not in str(e):
-            print(f"Emotion detection error: {e}")
-        return []
-    except Exception as e:
-        print(f"Emotion detection error: {e}")
-        return []
+    except Exception:
+        # Silently fail if face is not clear or backend dependencies are missing
+        return _cached_emotions
 
 
 def process_frame(base64_data: str) -> dict:
@@ -316,7 +326,8 @@ def process_frame(base64_data: str) -> dict:
     h, w = frame.shape[:2]
 
     objects = detect_objects(frame)
-    emotions = detect_emotions(frame)
+    has_person = any(o["label"] == "person" for o in objects)
+    emotions = detect_emotions(frame, has_person)
     narration = build_scene_narration(objects, emotions)
 
     elapsed = round((time.time() - start_t) * 1000)

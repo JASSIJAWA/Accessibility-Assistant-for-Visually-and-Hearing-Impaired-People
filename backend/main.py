@@ -163,12 +163,12 @@ async def vision_endpoint(websocket: WebSocket):
                 result["scene_description"] = last_gemini_description
 
                 await websocket.send_text(json.dumps(result))
+            except WebSocketDisconnect:
+                print("❌ Vision WebSocket disconnected (client closed)")
+                break
             except Exception as e:
                 print(f"❌ Frame processing error: {e}", flush=True)
-                import traceback
-                traceback.print_exc()
-                error_msg = json.dumps({"error": str(e)})
-                await websocket.send_text(error_msg)
+                break
             finally:
                 processing = False
 

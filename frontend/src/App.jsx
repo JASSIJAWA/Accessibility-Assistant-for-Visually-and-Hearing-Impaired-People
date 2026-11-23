@@ -78,31 +78,30 @@ function App() {
         </header>
 
         {/* Dashboard Grid */}
-        <main className="flex-1 flex flex-col lg:grid lg:grid-cols-[1.4fr_1fr] lg:grid-rows-[1.6fr_1fr] gap-3 p-3 md:p-4 min-h-0 overflow-y-auto lg:overflow-hidden pb-20 md:pb-4">
+        <main className="flex-1 flex flex-col p-3 md:p-4 min-h-0 overflow-y-auto lg:overflow-hidden pb-20 md:pb-4">
 
-          {activeTab === 'vision' ? (
-            <>
-              {/* Camera Card */}
-              <div className="lg:row-span-2 bg-[#14142d]/60 backdrop-blur-2xl border border-white/[0.07] rounded-2xl overflow-hidden flex flex-col min-h-[250px] sm:min-h-[300px] lg:min-h-0">
-                <CameraFeed onDetectionUpdate={handleDetectionUpdate} />
-              </div>
-
-              {/* Transcript Card */}
-              <div className="bg-[#14142d]/60 backdrop-blur-2xl border border-white/[0.07] rounded-2xl overflow-hidden flex flex-col min-h-[250px] lg:min-h-0">
-                <TranscriptPanel />
-              </div>
-
-              {/* Alerts Card */}
-              <div className="bg-[#14142d]/60 backdrop-blur-2xl border border-white/[0.07] rounded-2xl overflow-hidden flex flex-col min-h-[220px] lg:min-h-0">
-                <AlertPanel visionData={visionData} />
-              </div>
-            </>
-          ) : (
-            /* Hearing tab — full width */
-            <div className="lg:col-span-2 lg:row-span-2 bg-[#14142d]/60 backdrop-blur-2xl border border-white/[0.07] rounded-2xl overflow-hidden flex flex-col min-h-[400px] lg:min-h-0">
-              <HearingAssistant />
+          {/* Vision View */}
+          <div className={`flex-1 flex flex-col lg:grid lg:grid-cols-[1.4fr_1fr] lg:grid-rows-[1.6fr_1fr] gap-3 h-full ${activeTab === 'vision' ? '' : 'hidden'}`}>
+            {/* Camera Card */}
+            <div className="lg:row-span-2 bg-[#14142d]/60 backdrop-blur-2xl border border-white/[0.07] rounded-2xl overflow-hidden flex flex-col min-h-[250px] sm:min-h-[300px] lg:min-h-0">
+              <CameraFeed onDetectionUpdate={handleDetectionUpdate} />
             </div>
-          )}
+
+            {/* Transcript Card */}
+            <div className="bg-[#14142d]/60 backdrop-blur-2xl border border-white/[0.07] rounded-2xl overflow-hidden flex flex-col min-h-[250px] lg:min-h-0">
+              <TranscriptPanel />
+            </div>
+
+            {/* Alerts Card */}
+            <div className="bg-[#14142d]/60 backdrop-blur-2xl border border-white/[0.07] rounded-2xl overflow-hidden flex flex-col min-h-[220px] lg:min-h-0">
+              <AlertPanel visionData={visionData} />
+            </div>
+          </div>
+
+          {/* Hearing View */}
+          <div className={`flex-1 bg-[#14142d]/60 backdrop-blur-2xl border border-white/[0.07] rounded-2xl overflow-hidden flex flex-col h-full min-h-[400px] ${activeTab === 'hearing' ? '' : 'hidden'}`}>
+            <HearingAssistant />
+          </div>
 
         </main>
       </div>
