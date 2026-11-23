@@ -18,32 +18,27 @@ _last_description = ""
 _lock = threading.Lock()
 _initialized = False
 
-# Start at 8s interval, increases on rate limit, resets on success
-_current_interval = 8.0
-MIN_INTERVAL = 8.0
-MAX_INTERVAL = 60.0  # Back off up to 1 minute
+# Start at 4.5s interval for responsive navigation guidance
+_current_interval = 4.5
+MIN_INTERVAL = 4.5
+MAX_INTERVAL = 45.0  # Back off up to 45s on rate limit
 _rate_limited_until = 0.0  # Timestamp when rate limit expires
 
-SCENE_PROMPT = """You are a real-time navigation assistant for a blind person. Their phone camera is pointing forward.
+SCENE_PROMPT = """You are a real-time live navigation guide for a visually impaired person holding their phone forward.
 
-DETECTED OBJECTS (from AI object detection):
+DETECTED OBJECTS (YOLO AI):
 {detections}
 
-Using BOTH the image AND the detection data above, give a 2-3 sentence spoken guide. Rules:
+Give a 1 to 2 sentence immediate spoken guide (under 30 words). Rules:
+1. START with the path ahead: state if path is clear or if there is an obstacle.
+2. If an obstacle is closer than 1.5m, immediately warn them (e.g. "Careful, chair 1 meter on your left").
+3. Use exact distance and position from the detections (e.g. "2 meters ahead", "to your right").
+4. Mention key landmarks or openings (doorway, hallway, stairs, sidewalk).
+5. Speak directly, concisely, and naturally as a walking guide. Do not say "In this image" or "I can see".
 
-1. START with the nearest obstacle/hazard and its exact position (use the detection data)
-2. Describe the overall scene context (room type, outdoor, hallway, etc.)
-3. Mention anything the camera sees that the object detector missed (text on signs, open doors, stairs, edges, wet floor, cables on ground)
-4. Use EXACT distances from the detection data (e.g. "chair 1.5 meters on your left")
-5. If something is closer than 1.5 meters, say "CAREFUL" or "WATCH OUT"
-6. Speak naturally as if guiding a friend — short, clear sentences
-7. Don't say "I see" or "In this image" — talk directly to the person
-8. Don't repeat every object — focus on what MATTERS for safe navigation
-9. If nothing dangerous is nearby, describe the path ahead briefly
-
-Example: "Careful, chair about 1 meter on your left. You're in a living room, clear path ahead to the doorway about 4 meters away."
-Example: "Two people ahead, about 3 meters. You're on a sidewalk, the road is to your right."
-Example: "Path is clear. You're in a hallway, there's a door at the end about 5 meters ahead." """
+Example: "Path is clear ahead. Doorway is straight ahead about 3 meters."
+Example: "Watch out, chair 1 meter on your left. Clear path to your right."
+Example: "Two people approaching 3 meters ahead on the walkway." """
 
 
 def _get_client():
@@ -139,7 +134,7 @@ def describe_scene(frame_base64: str, objects: List[dict] = None) -> Optional[st
                         types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
                     ],
                     config=types.GenerateContentConfig(
-                        max_output_tokens=120,
+                        max_output_tokens=90,
                         temperature=0.2,
                     ),
                 )
