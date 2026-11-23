@@ -35,29 +35,79 @@ def get_deepface():
 yolo_model = YOLO("yolo11m.pt")
 
 
-# ─── Known real-world heights (meters) for calibrated distance estimation ───
-# Source: Visiona AI spec — known object dimensions for focal-length estimation
-KNOWN_HEIGHTS_M = {
-    "person": 1.70, "bicycle": 1.10, "car": 1.50, "motorcycle": 1.10,
-    "bus": 3.00, "truck": 3.50, "traffic light": 0.70, "fire hydrant": 0.50,
-    "stop sign": 0.75, "bench": 0.85, "cat": 0.30, "dog": 0.50,
-    "chair": 0.85, "couch": 0.85, "dining table": 0.75, "toilet": 0.40,
-    "tv": 0.50, "laptop": 0.25, "cell phone": 0.14, "book": 0.25,
-    "bottle": 0.25, "cup": 0.12, "backpack": 0.50, "umbrella": 1.00,
-    "suitcase": 0.70, "refrigerator": 1.70, "oven": 0.85, "microwave": 0.30,
-    "door": 2.00, "potted plant": 0.40, "bed": 0.60, "clock": 0.30,
+# ─── Known real-world physical dimensions (meters) for calibrated distance estimation ───
+# Calibrated for monocular perspective geometry (width + height dual-axis)
+REAL_OBJECT_METRICS = {
+    # People & Living
+    "person":        {"w": 0.45, "h": 1.70, "mode": "person"},
+    "dog":           {"w": 0.30, "h": 0.55, "mode": "h"},
+    "cat":           {"w": 0.20, "h": 0.30, "mode": "h"},
+    "horse":         {"w": 0.60, "h": 1.60, "mode": "h"},
+    "sheep":         {"w": 0.40, "h": 0.70, "mode": "h"},
+    "cow":           {"w": 0.70, "h": 1.50, "mode": "h"},
+    "bird":          {"w": 0.15, "h": 0.20, "mode": "h"},
+
+    # Vehicles & Transportation
+    "car":           {"w": 1.80, "h": 1.50, "mode": "w"},
+    "bicycle":       {"w": 0.60, "h": 1.05, "mode": "h"},
+    "motorcycle":    {"w": 0.80, "h": 1.10, "mode": "h"},
+    "bus":           {"w": 2.50, "h": 3.20, "mode": "w"},
+    "truck":         {"w": 2.50, "h": 3.50, "mode": "w"},
+    "train":         {"w": 3.00, "h": 3.80, "mode": "w"},
+    "boat":          {"w": 2.00, "h": 1.50, "mode": "w"},
+    "airplane":      {"w": 8.00, "h": 3.00, "mode": "w"},
+
+    # Outdoor & Street Furniture
+    "traffic light": {"w": 0.35, "h": 0.85, "mode": "h"},
+    "fire hydrant":  {"w": 0.35, "h": 0.65, "mode": "h"},
+    "stop sign":     {"w": 0.75, "h": 0.75, "mode": "w"},
+    "parking meter": {"w": 0.30, "h": 1.40, "mode": "h"},
+    "bench":         {"w": 1.40, "h": 0.80, "mode": "w"},
+
+    # Indoor Furniture & Obstacles
+    "chair":         {"w": 0.50, "h": 0.85, "mode": "avg"},
+    "couch":         {"w": 1.80, "h": 0.85, "mode": "w"},
+    "dining table":  {"w": 1.20, "h": 0.75, "mode": "w"},
+    "bed":           {"w": 1.50, "h": 0.70, "mode": "w"},
+    "toilet":        {"w": 0.45, "h": 0.75, "mode": "h"},
+    "door":          {"w": 0.85, "h": 2.05, "mode": "h"},
+    "potted plant":  {"w": 0.30, "h": 0.50, "mode": "h"},
+
+    # Electronics & Office
+    "tv":            {"w": 0.90, "h": 0.55, "mode": "w"},
+    "laptop":        {"w": 0.33, "h": 0.23, "mode": "w"},
+    "mouse":         {"w": 0.065, "h": 0.11, "mode": "w"},
+    "remote":        {"w": 0.05, "h": 0.18, "mode": "h"},
+    "keyboard":      {"w": 0.44, "h": 0.14, "mode": "w"},
+    "cell phone":    {"w": 0.075, "h": 0.15, "mode": "h"},
+    "book":          {"w": 0.16, "h": 0.24, "mode": "h"},
+    "clock":         {"w": 0.30, "h": 0.30, "mode": "avg"},
+
+    # Kitchen & Household
+    "bottle":        {"w": 0.075, "h": 0.25, "mode": "h"},
+    "wine glass":    {"w": 0.08, "h": 0.20, "mode": "h"},
+    "cup":           {"w": 0.085, "h": 0.10, "mode": "w"},
+    "fork":          {"w": 0.03, "h": 0.18, "mode": "h"},
+    "knife":         {"w": 0.03, "h": 0.22, "mode": "h"},
+    "spoon":         {"w": 0.04, "h": 0.18, "mode": "h"},
+    "bowl":          {"w": 0.16, "h": 0.08, "mode": "w"},
+    "microwave":     {"w": 0.50, "h": 0.30, "mode": "w"},
+    "oven":          {"w": 0.75, "h": 0.85, "mode": "avg"},
+    "toaster":       {"w": 0.28, "h": 0.20, "mode": "w"},
+    "sink":          {"w": 0.55, "h": 0.40, "mode": "w"},
+    "refrigerator":  {"w": 0.75, "h": 1.75, "mode": "h"},
+    "vase":          {"w": 0.18, "h": 0.35, "mode": "h"},
+
+    # Bags & Personal Items
+    "backpack":      {"w": 0.35, "h": 0.45, "mode": "h"},
+    "umbrella":      {"w": 0.90, "h": 0.80, "mode": "w"},
+    "handbag":       {"w": 0.30, "h": 0.25, "mode": "w"},
+    "tie":           {"w": 0.08, "h": 0.45, "mode": "h"},
+    "suitcase":      {"w": 0.45, "h": 0.65, "mode": "h"},
 }
 
-# Approximate camera focal length in pixels (calibrated for typical phone camera at 640px height)
-# Formula: focal_px = (known_height_px * known_distance_m) / known_height_m
-# Calibrated: person at 3m fills ~300px in a 640px frame → focal = (300*3)/1.7 ≈ 530
-FOCAL_LENGTH_PX = 530.0
-
-# Fallback: bounding-box-ratio distance table (for objects without known sizes)
-RATIO_TO_STEPS = [
-    (0.70, 1), (0.50, 2), (0.35, 3), (0.25, 5),
-    (0.15, 8), (0.10, 12), (0.05, 15),
-]
+# Temporal distance memory to prevent flickering across frames
+_track_distance_history = {}
 
 # Scene memory for change detection
 _last_scene_key = ""
@@ -74,31 +124,62 @@ def decode_frame(base64_data: str) -> np.ndarray:
     return frame
 
 
-def estimate_distance(label: str, box_height: float, frame_height: float) -> dict:
+def estimate_distance(label: str, box_w: float, box_h: float, frame_w: float, frame_h: float, track_id: int = -1) -> dict:
     """
-    Estimate distance using known object sizes (focal-length method) or
-    bounding-box ratio fallback. Returns meters and steps.
+    Calibrated monocular distance estimation:
+    - Automatically scales focal length with frame resolution (FOV ~55°)
+    - Uses dual-axis (width + height) to handle arbitrary camera angles and perspectives
+    - Automatically detects standing vs sitting / torso for people
+    - Smooths distance across frames for tracked objects
     """
-    known_h = KNOWN_HEIGHTS_M.get(label)
+    global _track_distance_history
 
-    if known_h and box_height > 10:
-        # Focal length formula: distance = (real_height * focal_length) / pixel_height
-        distance_m = (known_h * FOCAL_LENGTH_PX) / box_height
-        distance_m = max(0.3, min(distance_m, 20.0))  # Clamp to reasonable range
+    focal_px = frame_h * 0.98  # Standard phone camera focal length in pixels
+
+    dim = REAL_OBJECT_METRICS.get(label)
+    if dim and box_w > 4 and box_h > 4:
+        mode = dim["mode"]
+        w_real = dim["w"]
+        h_real = dim["h"]
+
+        if mode == "person":
+            aspect = box_h / max(box_w, 1.0)
+            if aspect < 2.0:
+                h_real = 0.88  # Upper body / seated person
+            dist_h = (h_real * focal_px) / box_h
+            dist_w = (w_real * focal_px) / box_w
+            # Blend height & width
+            raw_dist = (dist_h * 0.6) + (dist_w * 0.4)
+        elif mode == "w":
+            raw_dist = (w_real * focal_px) / box_w
+        elif mode == "h":
+            raw_dist = (h_real * focal_px) / box_h
+        else:  # avg
+            dist_w = (w_real * focal_px) / box_w
+            dist_h = (h_real * focal_px) / box_h
+            raw_dist = (dist_w + dist_h) / 2.0
     else:
-        # Fallback: ratio-based estimation
-        ratio = box_height / frame_height if frame_height > 0 else 0
-        distance_m = 0.5  # default very close
-        for r, steps in RATIO_TO_STEPS:
-            if ratio > r:
-                distance_m = steps * 0.75  # 1 step ≈ 0.75m
-                break
-        else:
-            distance_m = 12.0  # Far away
+        # Dynamic fallback: relative bounding box size against screen dimensions
+        box_max = max(box_w, box_h)
+        f_max = max(frame_w, frame_h)
+        ratio = box_max / f_max if f_max > 0 else 0.1
+        raw_dist = 0.55 / max(ratio, 0.04)
 
-    steps = max(1, round(distance_m / 0.75))
+    raw_dist = max(0.2, min(raw_dist, 15.0))
+
+    # Apply temporal exponential moving average (EMA) smoothing for tracked objects
+    if track_id != -1:
+        prev = _track_distance_history.get(track_id)
+        if prev is not None:
+            raw_dist = (0.7 * raw_dist) + (0.3 * prev)
+        _track_distance_history[track_id] = raw_dist
+
+    if len(_track_distance_history) > 150:
+        _track_distance_history.clear()
+
+    steps = max(1, round(raw_dist / 0.75))
     return {
-        "distance_m": round(distance_m, 1),
+        "distance_m": round(raw_dist, 1),
         "distance_steps": steps,
     }
 
@@ -114,13 +195,13 @@ def get_position(box_center_x: float, frame_width: float) -> str:
         return "on your right"
 
 
-def get_urgency(distance_steps: int) -> str:
-    """Classify urgency based on distance."""
-    if distance_steps <= 2:
-        return "critical"   # Very close — collision risk
-    elif distance_steps <= 5:
-        return "warning"    # Close — be careful
-    elif distance_steps <= 10:
+def get_urgency(distance_m: float) -> str:
+    """Classify urgency based on actual metric distance."""
+    if distance_m <= 1.2:
+        return "critical"   # Very close — collision hazard
+    elif distance_m <= 2.5:
+        return "warning"    # Getting close
+    elif distance_m <= 5.0:
         return "info"       # Nearby — awareness
     else:
         return "background" # Far — low priority
@@ -144,11 +225,12 @@ def detect_objects(frame: np.ndarray, conf_threshold: float = 0.45) -> list:
             track_id = int(box.id[0]) if box.id is not None else -1
 
             box_center_x = (x1 + x2) / 2
-            box_height = y2 - y1
+            box_width = max(1.0, x2 - x1)
+            box_height = max(1.0, y2 - y1)
 
-            dist = estimate_distance(label, box_height, h)
+            dist = estimate_distance(label, box_width, box_height, w, h, track_id)
             position = get_position(box_center_x, w)
-            urgency = get_urgency(dist["distance_steps"])
+            urgency = get_urgency(dist["distance_m"])
 
             detections.append({
                 "label": label,
@@ -218,12 +300,13 @@ def build_scene_narration(objects: list, emotions: list) -> dict:
         name = f"{count} {label}s" if count > 1 else label
 
         # Build distance phrase
+        m = g["closest_m"]
         if urgency == "critical":
-            parts.append(f"Caution! {name} very close, {pos}")
+            parts.append(f"Caution! {name} {m} meters {pos}")
         elif urgency == "warning":
-            parts.append(f"{name} about {steps} steps {pos}")
+            parts.append(f"{name} about {m} meters {pos}")
         else:
-            parts.append(f"{name} {pos}")
+            parts.append(f"{name} {m} meters {pos}")
 
     # ── Emotions ──
     if emotions:
