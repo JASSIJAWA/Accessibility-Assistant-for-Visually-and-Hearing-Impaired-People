@@ -14,7 +14,7 @@ import cv2
 from dotenv import load_dotenv
 from vision import process_frame
 from scene_ai import describe_scene, get_last_description
-from hearing_ai import analyze_conversation, reset_conversation, add_transcript_line
+from hearing_ai import analyze_conversation, reset_conversation, add_transcript_line, process_audio_chunk
 
 # Load .env file for GEMINI_API_KEY
 load_dotenv()
@@ -178,13 +178,26 @@ async def vision_endpoint(websocket: WebSocket):
         print(f"❌ Vision WebSocket error: {e}")
 
 
+@app.post("/api/hearing/analyze")
+async def hearing_analyze_text(request: Request):
+    """Analyze conversation text via REST API."""
+    try:
+        body = await request.json()
+        text = body.get("text", "")
+        result = await asyncio.to_thread(analyze_conversation, text)
+        return result
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.websocket("/ws/hearing")
 async def hearing_endpoint(websocket: WebSocket):
     """
     WebSocket endpoint for hearing impaired module.
     - Receives transcript lines from browser Web Speech API
-    - Sends to Gemini for summarization + tone analysis
-    - Returns: summary, tone, key_points, is_urgent
+    - Receives raw audio chunks from MediaRecorder
+    - Sends to Gemini for transcription + summarization + tone analysis
+    - Returns: summary, tone, key_points, is_urgent, transcription
     """
     await websocket.accept()
     print("✅ Hearing WebSocket connected")
@@ -198,6 +211,13 @@ async def hearing_endpoint(websocket: WebSocket):
         except Exception as e:
             print(f"❌ Hearing analysis error: {e}")
 
+    async def run_audio_analysis(audio_bytes: bytes, mime_type: str):
+        try:
+            result = await asyncio.to_thread(process_audio_chunk, audio_bytes, mime_type)
+            await websocket.send_text(json.dumps(result))
+        except Exception as e:
+            print(f"❌ Audio analysis error: {e}")
+
     try:
         while True:
             data = await websocket.receive_text()
@@ -210,11 +230,20 @@ async def hearing_endpoint(websocket: WebSocket):
                 await websocket.send_text(json.dumps({"status": "reset"}))
                 continue
 
+            if action == "audio":
+                audio_base64 = msg.get("data", "")
+                mime_type = msg.get("mime_type", "audio/webm")
+                if audio_base64:
+                    if "," in audio_base64:
+                        audio_base64 = audio_base64.split(",")[1]
+                    audio_bytes = base64.b64decode(audio_base64)
+                    asyncio.create_task(run_audio_analysis(audio_bytes, mime_type))
+                continue
+
             if action == "transcript":
                 text = msg.get("text", "").strip()
                 if text:
                     add_transcript_line(text)
-                    # Only run Gemini analysis if no task is currently running
                     if hearing_task is None or hearing_task.done():
                         hearing_task = asyncio.create_task(
                             run_hearing_analysis(text)

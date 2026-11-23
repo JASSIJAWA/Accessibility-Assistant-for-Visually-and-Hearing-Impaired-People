@@ -129,19 +129,32 @@ def describe_scene(frame_base64: str, objects: List[dict] = None) -> Optional[st
         det_text = _format_detections(objects or [])
         prompt = SCENE_PROMPT.format(detections=det_text)
 
-        response = client.models.generate_content(
-            model="gemini-3.8-flash",
-            contents=[
-                prompt,
-                types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
-            ],
-            config=types.GenerateContentConfig(
-                max_output_tokens=120,
-                temperature=0.2,
-            ),
-        )
+        description = None
+        for model_name in ["gemini-3.5-flash-lite", "gemini-3.8-flash"]:
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=[
+                        prompt,
+                        types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
+                    ],
+                    config=types.GenerateContentConfig(
+                        max_output_tokens=120,
+                        temperature=0.2,
+                    ),
+                )
+                description = response.text.strip()
+                if description:
+                    break
+            except Exception as model_err:
+                err_str = str(model_err).lower()
+                if "503" in err_str or "unavailable" in err_str or "not_found" in err_str:
+                    continue
+                raise model_err
 
-        description = response.text.strip()
+        if not description:
+            return None
+
         _last_description = description
 
         # Success — reset interval to normal
