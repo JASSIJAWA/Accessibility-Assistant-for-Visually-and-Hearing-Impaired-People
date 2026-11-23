@@ -445,7 +445,7 @@ function HearingAssistant() {
                   Gemini Multimodal AI transcribing speech & analyzing emotion...
                 </span>
               ) : (
-                'Tap the purple button below and speak naturally, or test with quick scenarios'
+                'Tap the microphone button below and speak naturally'
               )}
             </p>
           </div>
@@ -469,37 +469,6 @@ function HearingAssistant() {
           </span>
         </div>
       )}
-
-      {/* ── Quick Test Scenarios (Instant Demonstration) ── */}
-      <div className="mx-3 mt-2 flex-shrink-0">
-        <p className="text-[0.65rem] text-white/30 uppercase tracking-wider mb-1 px-1">Quick Scenarios (One-Tap Test):</p>
-        <div className="flex flex-wrap gap-1.5">
-          <button
-            onClick={() => sendText("Watch out! There is a fast moving car coming right towards you!")}
-            className="text-[0.68rem] px-2.5 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-300 border border-red-500/25 transition-colors flex items-center gap-1 font-medium"
-          >
-            <span>🚨</span> Emergency Alert
-          </button>
-          <button
-            onClick={() => sendText("Excuse me, could you please tell me where the nearest pharmacy is located?")}
-            className="text-[0.68rem] px-2.5 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/25 transition-colors flex items-center gap-1 font-medium"
-          >
-            <span>😊</span> Asking Help
-          </button>
-          <button
-            onClick={() => sendText("I have been waiting here for two hours, this is completely unacceptable and ridiculous!")}
-            className="text-[0.68rem] px-2.5 py-1.5 rounded-lg bg-orange-500/10 hover:bg-orange-500/20 text-orange-300 border border-orange-500/25 transition-colors flex items-center gap-1 font-medium"
-          >
-            <span>😠</span> Angry Complaint
-          </button>
-          <button
-            onClick={() => sendText("The project evaluation is scheduled for tomorrow morning in the computer science lab.")}
-            className="text-[0.68rem] px-2.5 py-1.5 rounded-lg bg-sky-500/10 hover:bg-sky-500/20 text-sky-300 border border-sky-500/25 transition-colors flex items-center gap-1 font-medium"
-          >
-            <span>💼</span> Normal Info
-          </button>
-        </div>
-      </div>
 
       {/* ── Live Transcripts / Captions Feed ── */}
       <div className="flex-1 overflow-y-auto px-3.5 py-3 space-y-2.5 min-h-0">
