@@ -1,11 +1,13 @@
 """
-Hearing AI Module — Powered by local Faster-Whisper + Gemini Cognitive Analysis.
+Hearing AI Module — Powered by Gemini Multimodal Audio Intelligence + Local Faster-Whisper Fallback.
 
-Features:
-  - Local speech-to-text with faster-whisper (tiny.en, runs in ~80ms on CPU)
-  - Zero Google speech cloud errors or network drops
-  - Gemini conversation summarization and emotional tone classification
-  - Emergency/distress detection with visual and haptic alerts
+Capabilities:
+  1. Ultra-high-accuracy speech-to-text (transcribes verbatim, handles accents, slang, noise)
+  2. Acoustic event detection (car horns, sirens, alarms, screaming in brackets [like this])
+  3. Emotional tone classification (urgent, angry, happy, sad, calm, etc.)
+  4. Real-time cognitive summary & key takeaways for hearing-impaired users
+  5. Emergency / distress detection with instant visual & haptic alerts
+  6. Robust local fallback to Faster-Whisper base.en if offline
 """
 
 import os
@@ -13,25 +15,13 @@ import io
 import time
 import json
 import base64
+import wave
 from dotenv import load_dotenv
 
 load_dotenv()
 
 from google import genai
 from google.genai import types
-
-# Lazy load Whisper model
-_whisper_model = None
-
-def get_whisper():
-    global _whisper_model
-    if _whisper_model is None:
-        from faster_whisper import WhisperModel
-        print("⚡ Loading Faster-Whisper base.en model on CPU...")
-        _whisper_model = WhisperModel("base.en", device="cpu", compute_type="int8")
-        print("✅ Faster-Whisper base.en ready for accurate speech transcription!")
-    return _whisper_model
-
 
 PRIMARY_MODEL = "gemini-3.5-flash-lite"
 FALLBACK_MODEL = "gemini-3.8-flash"
@@ -51,11 +41,60 @@ def get_client():
     return _client
 
 
-# ─── Rate limiting ────────────────────────────────────────────────────────────
+# Lazy load Faster-Whisper model for fallback
+_whisper_model = None
+
+def get_whisper():
+    global _whisper_model
+    if _whisper_model is None:
+        from faster_whisper import WhisperModel
+        print("⚡ Loading Faster-Whisper base.en model on CPU (fallback)...")
+        _whisper_model = WhisperModel("base.en", device="cpu", compute_type="int8")
+        print("✅ Faster-Whisper base.en ready as fallback engine")
+    return _whisper_model
+
+
+# ─── Audio Format Converter (Ensures 16kHz mono WAV) ────────────────────────
+def convert_to_wav(audio_bytes: bytes) -> bytes:
+    """
+    Ensures audio is in 16kHz mono 16-bit PCM WAV.
+    If already WAV, returns as-is.
+    If WebM, MP4, OGG, or AAC, converts using PyAV.
+    """
+    if not audio_bytes or len(audio_bytes) < 44:
+        return audio_bytes
+
+    # Check if already a valid WAV
+    if audio_bytes[:4] == b"RIFF" and b"WAVE" in audio_bytes[:16]:
+        return audio_bytes
+
+    try:
+        import av
+        input_buf = io.BytesIO(audio_bytes)
+        container = av.open(input_buf)
+        resampler = av.AudioResampler(format='s16', layout='mono', rate=16000)
+        output_buf = io.BytesIO()
+        with wave.open(output_buf, 'wb') as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(16000)
+            for frame in container.decode(audio=0):
+                for rf in resampler.resample(frame):
+                    wf.writeframes(rf.to_ndarray().tobytes())
+        result = output_buf.getvalue()
+        if len(result) > 44:
+            return result
+    except Exception as e:
+        print(f"⚠️ Audio converter notice: {e}")
+
+    return audio_bytes
+
+
+# ─── Rate Limiting & Rolling Buffer ──────────────────────────────────────────
 _last_call_time = 0.0
-_min_interval = 3.0
-_current_interval = 3.0
-_MAX_INTERVAL = 30.0
+_min_interval = 1.5
+_current_interval = 1.5
+_MAX_INTERVAL = 20.0
 
 def _should_call_gemini() -> bool:
     global _last_call_time
@@ -72,7 +111,6 @@ def _on_rate_limit():
     _last_call_time = time.time()
 
 
-# ─── Rolling conversation buffer ──────────────────────────────────────────────
 _conversation_buffer = []
 _MAX_BUFFER_LINES = 30
 
@@ -88,15 +126,6 @@ def get_conversation_text() -> str:
     return "\n".join(_conversation_buffer)
 
 
-_last_result = {
-    "summary": "",
-    "tone": "neutral",
-    "tone_emoji": "😐",
-    "key_points": [],
-    "is_urgent": False,
-    "transcription": ""
-}
-
 TONE_EMOJI = {
     "urgent": "🚨",
     "alarmed": "🚨",
@@ -109,6 +138,15 @@ TONE_EMOJI = {
     "neutral": "😐",
     "excited": "😃",
     "worried": "😟",
+}
+
+_last_result = {
+    "summary": "",
+    "tone": "neutral",
+    "tone_emoji": "😐",
+    "key_points": [],
+    "is_urgent": False,
+    "transcription": ""
 }
 
 
@@ -125,14 +163,89 @@ def _parse_gemini_json(raw_text: str) -> dict:
     return json.loads(raw)
 
 
-def transcribe_audio_bytes(audio_bytes: bytes) -> str:
+# ─── Primary Engine: Gemini Multimodal Audio Perception ───────────────────────
+GEMINI_AUDIO_PROMPT = """You are the audio and speech perception intelligence of an assistive AI for deaf and hard-of-hearing people.
+Listen to this audio recording carefully and provide:
+1. "transcription": Exact verbatim transcript of all spoken words. Accurately capture Indian and global accents, casual speech, questions, and instructions. If there are important environmental sounds (e.g. car honking, siren wailing, glass breaking, dog barking, alarm beeping, screams for help), include them clearly in square brackets like [Car horn honking] or [Siren wailing]. If no words or meaningful sounds are heard, return "".
+2. "summary": A concise 1-2 sentence summary of what was communicated or heard for the deaf user.
+3. "tone": The speaker's primary emotion or tone. Choose one: urgent, angry, happy, sad, confused, calm, neutral, excited, or worried.
+4. "key_points": A list of 1 to 3 concise takeaway bullet points.
+5. "is_urgent": true if this audio indicates danger, warning, emergency, accident, siren, screams for help, or aggressive hostility; false otherwise.
+
+Output ONLY valid JSON in this exact structure:
+{
+  "transcription": "verbatim text or sound description",
+  "summary": "1-2 sentence clear summary",
+  "tone": "urgent/angry/happy/sad/confused/calm/neutral/excited/worried",
+  "key_points": ["point 1", "point 2"],
+  "is_urgent": true or false
+}"""
+
+
+def transcribe_and_analyze_with_gemini(audio_bytes: bytes, mime_type: str = "audio/wav") -> dict:
     """
-    Transcribes audio bytes locally using faster-whisper base.en model.
-    Uses beam search (beam_size=5) and VAD filtering for high accuracy.
+    Sends raw audio directly to Gemini Multimodal Audio model.
+    Transcribes words + environmental sounds AND performs cognitive analysis in one fast call.
     """
+    global _last_result
+
+    client = get_client()
+    wav_bytes = convert_to_wav(audio_bytes)
+
+    for model_name in [PRIMARY_MODEL, FALLBACK_MODEL]:
+        try:
+            t0 = time.time()
+            response = client.models.generate_content(
+                model=model_name,
+                contents=[
+                    types.Part.from_bytes(data=wav_bytes, mime_type="audio/wav"),
+                    GEMINI_AUDIO_PROMPT
+                ],
+                config=types.GenerateContentConfig(
+                    temperature=0.1,
+                    max_output_tokens=350,
+                ),
+            )
+            dt = round((time.time() - t0) * 1000)
+            parsed = _parse_gemini_json(response.text)
+
+            transcription = parsed.get("transcription", "").strip()
+            summary = parsed.get("summary", "").strip()
+            tone = parsed.get("tone", "neutral").lower()
+            key_points = parsed.get("key_points", [])
+            is_urgent = bool(parsed.get("is_urgent", False))
+
+            if transcription:
+                add_transcript_line(transcription)
+
+            _last_result = {
+                "transcription": transcription,
+                "summary": summary,
+                "tone": tone,
+                "tone_emoji": TONE_EMOJI.get(tone, "😐"),
+                "key_points": key_points,
+                "is_urgent": is_urgent,
+            }
+            _on_success()
+            print(f"🎙️ Gemini Audio ({dt}ms) [{model_name}]: \"{transcription}\" | {tone} | Urgent={is_urgent}")
+            return _last_result
+
+        except Exception as e:
+            err = str(e).lower()
+            if "429" in err or "quota" in err or "rate" in err or "503" in err:
+                _on_rate_limit()
+            print(f"⚠️ Gemini audio failed on {model_name}: {e}")
+
+    return None
+
+
+# ─── Fallback Engine: Local Faster-Whisper base.en ────────────────────────────
+def transcribe_audio_whisper_fallback(audio_bytes: bytes) -> str:
+    """Fallback local transcription if Gemini API is unreachable or rate limited."""
     try:
         whisper = get_whisper()
-        buf = io.BytesIO(audio_bytes)
+        wav_bytes = convert_to_wav(audio_bytes)
+        buf = io.BytesIO(wav_bytes)
         segments, _ = whisper.transcribe(
             buf,
             beam_size=5,
@@ -141,18 +254,59 @@ def transcribe_audio_bytes(audio_bytes: bytes) -> str:
             temperature=[0.0, 0.2],
             vad_filter=True,
             vad_parameters=dict(min_silence_duration_ms=400),
-            initial_prompt="A clear spoken conversation about daily life, navigation, questions, directions, and emergencies."
+            initial_prompt="A clear spoken conversation, questions, directions, and emergencies."
         )
-        text = " ".join(seg.text.strip() for seg in segments).strip()
-        return text
+        return " ".join(seg.text.strip() for seg in segments).strip()
     except Exception as e:
-        print(f"❌ Whisper transcription error: {e}")
+        print(f"❌ Whisper fallback error: {e}")
         return ""
 
 
+# ─── Main Audio Processing Entry Point ───────────────────────────────────────
+def process_audio_chunk(audio_bytes: bytes, mime_type: str = "audio/webm") -> dict:
+    """
+    Main audio handler for incoming microphone recordings.
+    1. Attempts Gemini Multimodal Audio (fast, ultra-accurate, tone+summary included).
+    2. Falls back to Faster-Whisper base.en if Gemini is offline/rate-limited.
+    """
+    global _last_result
+
+    if not audio_bytes or len(audio_bytes) < 400:
+        return _last_result
+
+    # 1. Primary: Direct Gemini Audio Understanding
+    result = transcribe_and_analyze_with_gemini(audio_bytes, mime_type)
+    if result is not None and (result.get("transcription") or result.get("summary")):
+        return result
+
+    # 2. Fallback: Local Whisper + Separate Gemini Text Analysis
+    print("⚡ Falling back to local Faster-Whisper base.en...")
+    t0 = time.time()
+    transcription = transcribe_audio_whisper_fallback(audio_bytes)
+    t_whisper = round((time.time() - t0) * 1000)
+
+    if not transcription:
+        print(f"🎙️ Whisper ({t_whisper}ms): No speech detected")
+        return {
+            "summary": "No speech detected in this audio segment.",
+            "tone": "neutral",
+            "tone_emoji": "😐",
+            "key_points": [],
+            "is_urgent": False,
+            "transcription": ""
+        }
+
+    print(f"🎙️ Whisper ({t_whisper}ms): \"{transcription}\"")
+    result = analyze_conversation(transcription)
+    result["transcription"] = transcription
+    return result
+
+
+# ─── Text-Based Cognitive Analysis (For Simulation buttons & Web Speech) ─────
 def analyze_conversation(transcript_text: str = None) -> dict:
     """
     Analyze conversation text using Gemini for tone, summary, and urgency.
+    Called when text is received from simulation buttons, typed input, or Web Speech API.
     """
     global _last_result
 
@@ -161,9 +315,6 @@ def analyze_conversation(transcript_text: str = None) -> dict:
 
     conversation = get_conversation_text()
     if not conversation.strip():
-        return _last_result
-
-    if not _should_call_gemini():
         return _last_result
 
     prompt = f"""You are an assistive AI for a deaf or hard-of-hearing person.
@@ -203,7 +354,7 @@ Analyze this and output ONLY valid JSON in this exact structure:
                 "transcription": transcript_text or "",
             }
             _on_success()
-            print(f"🎙️ Hearing AI: {_last_result['tone']} — {_last_result['summary'][:60]}...")
+            print(f"🎙️ Hearing Text AI: {_last_result['tone']} — {_last_result['summary'][:60]}...")
             return _last_result
 
         except Exception as e:
@@ -213,41 +364,19 @@ Analyze this and output ONLY valid JSON in this exact structure:
             else:
                 print(f"❌ Hearing AI error with {model_name}: {e}")
 
+    # Offline heuristic fallback
+    urgent_words = ["danger", "watch out", "fire", "car", "stop", "help", "emergency", "run", "careful", "hospital"]
+    lower_conv = conversation.lower()
+    is_urgent = any(w in lower_conv for w in urgent_words)
+    _last_result = {
+        "summary": transcript_text or "Conversation in progress.",
+        "tone": "urgent" if is_urgent else "neutral",
+        "tone_emoji": "🚨" if is_urgent else "😐",
+        "key_points": [transcript_text] if transcript_text else [],
+        "is_urgent": is_urgent,
+        "transcription": transcript_text or "",
+    }
     return _last_result
-
-
-def process_audio_chunk(audio_bytes: bytes, mime_type: str = "audio/webm") -> dict:
-    """
-    1. Transcribes audio using local faster-whisper.
-    2. Sends transcription to Gemini for summary & tone analysis.
-    """
-    global _last_result
-
-    if not audio_bytes or len(audio_bytes) < 500:
-        return _last_result
-
-    # Step 1: Transcribe with local Whisper
-    t0 = time.time()
-    transcription = transcribe_audio_bytes(audio_bytes)
-    t_whisper = round((time.time() - t0) * 1000)
-
-    if not transcription:
-        print(f"🎙️ Whisper ({t_whisper}ms): No speech detected")
-        return {
-            "summary": "No speech detected in this audio segment.",
-            "tone": "neutral",
-            "tone_emoji": "😐",
-            "key_points": [],
-            "is_urgent": False,
-            "transcription": ""
-        }
-
-    print(f"🎙️ Whisper ({t_whisper}ms): \"{transcription}\"")
-
-    # Step 2: Analyze with Gemini
-    result = analyze_conversation(transcription)
-    result["transcription"] = transcription
-    return result
 
 
 def reset_conversation():

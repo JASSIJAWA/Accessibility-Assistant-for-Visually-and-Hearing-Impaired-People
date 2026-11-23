@@ -17,8 +17,11 @@ function CameraFeed({ onDetectionUpdate, isActive = true }) {
 
   useEffect(() => {
     isActiveRef.current = isActive;
-    if (!isActive && typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
+    if (!isActive) {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+      if (intervalRef.current) clearTimeout(intervalRef.current);
     }
   }, [isActive]);
 
@@ -118,7 +121,7 @@ function CameraFeed({ onDetectionUpdate, isActive = true }) {
               // Reset the fallback timeout so we don't send duplicate frames
               if (intervalRef.current) clearTimeout(intervalRef.current);
               intervalRef.current = setTimeout(() => {
-                 if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                 if (isActiveRef.current && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
                      wsRef.current.send(base64);
                  }
               }, 1000);
