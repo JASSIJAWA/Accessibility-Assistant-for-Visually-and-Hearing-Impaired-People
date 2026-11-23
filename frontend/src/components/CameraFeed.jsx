@@ -44,9 +44,40 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
 
   const lastGeminiRef = useRef('');
   const narrationTimerRef = useRef(null);
+  const lastYoloAlertTimeRef = useRef(0);
+  const audioCtxRef = useRef(null);
+  const lastSonarPingRef = useRef(0);
+  const [isSonarEnabled, setIsSonarEnabled] = useState(true);
 
   const [facingMode, setFacingMode] = useState('environment');
   const [aspectRatio, setAspectRatio] = useState(4/3);
+
+  // Proximity Sonar Ping (Acoustic non-verbal radar for zero-delay spatial awareness)
+  const playSonarPing = useCallback((freq = 840, duration = 0.04, volume = 0.06) => {
+    if (isMuted || !isSonarEnabled) return;
+    try {
+      if (!audioCtxRef.current) {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        audioCtxRef.current = new AudioContextClass();
+      }
+      const ctx = audioCtxRef.current;
+      if (ctx.state === 'suspended') {
+        ctx.resume();
+      }
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, ctx.currentTime);
+      gain.gain.setValueAtTime(volume, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + duration);
+    } catch (e) {
+      // AudioContext blocked until interaction or unsupported
+    }
+  }, [isMuted, isSonarEnabled]);
 
   // Safe TTS Speak Helper with Chrome Android resume support
   const safeSpeak = useCallback((text) => {
@@ -54,7 +85,7 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
     try {
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 1.05;
+      utterance.rate = 1.15; // Snappy, prompt delivery
       utterance.volume = 1.0;
       if (window.speechSynthesis.paused) {
         window.speechSynthesis.resume();
@@ -369,7 +400,48 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
     };
   }, []);
 
-  // Gemini Scene Description Guidance
+  // 0. Proximity Sonar Ticking (Acoustic Parking Sensor for Real-Time 0ms Spatial Awareness)
+  useEffect(() => {
+    if (!isActive || !isGuidanceActive || !isSonarEnabled || isMuted) return;
+
+    const dist = detections.closest_distance_m;
+    if (dist === null || dist === undefined || dist > 1.8) return;
+
+    // Rapid ticks as obstacle nears: <0.6m = 180ms, <1.1m = 380ms, <1.8m = 750ms
+    let intervalMs = 750;
+    let freq = 740;
+    if (dist <= 0.6) {
+      intervalMs = 180;
+      freq = 1000;
+    } else if (dist <= 1.1) {
+      intervalMs = 380;
+      freq = 880;
+    }
+
+    const now = Date.now();
+    if (now - lastSonarPingRef.current >= intervalMs) {
+      lastSonarPingRef.current = now;
+      playSonarPing(freq, 0.04, 0.07);
+    }
+  }, [detections.closest_distance_m, isGuidanceActive, isSonarEnabled, isMuted, isActive, playSonarPing]);
+
+  // 1. Local YOLO Immediate Obstacle Reflex Alert (< 1.2m or critical hazard)
+  // DECOUPLED FROM GEMINI: Immediately interrupts & alerts on physical collision danger
+  useEffect(() => {
+    if (!isActive || !isGuidanceActive || isReadingText) return;
+    if (!detections.narration || !detections.scene_changed) return;
+
+    const now = Date.now();
+    // 2.5s cooldown between consecutive reflex alerts to prevent stutter
+    if (now - lastYoloAlertTimeRef.current < 2500) return;
+    lastYoloAlertTimeRef.current = now;
+
+    const narration = detections.narration;
+    setSpokenSubtitles(narration);
+    safeSpeak(narration);
+  }, [detections.narration, detections.scene_changed, isGuidanceActive, isReadingText, isActive, safeSpeak]);
+
+  // 2. Gemini High-Level Directional Guidance (Every ~3.5s when fresh)
   useEffect(() => {
     if (!isActive || !isGuidanceActive || isReadingText) {
       if (!isGuidanceActive && typeof window !== 'undefined' && 'speechSynthesis' in window) {
@@ -379,27 +451,21 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
     }
 
     const desc = detections.scene_description;
-    if (!desc || desc === lastGeminiRef.current) return;
-    lastGeminiRef.current = desc;
-    setSpokenSubtitles(desc);
-    safeSpeak(desc);
-  }, [detections.scene_description, isGuidanceActive, isReadingText, isActive, safeSpeak]);
+    if (!desc) return;
 
-  // YOLO Fallback Immediate Obstacle Alert (< 1.5m)
-  useEffect(() => {
-    if (!isActive || !isGuidanceActive || isReadingText) return;
-    if (!detections.narration || !detections.scene_changed) return;
-    if (detections.scene_description) return;
+    // Trigger ONLY when fresh Gemini guidance arrives from backend
+    if (detections.new_gemini_guidance && desc !== lastGeminiRef.current) {
+      lastGeminiRef.current = desc;
+      setSpokenSubtitles(desc);
 
-    const narration = detections.narration;
-    if (narrationTimerRef.current) return;
-    narrationTimerRef.current = setTimeout(() => {
-      narrationTimerRef.current = null;
-    }, 4000);
+      // If user is actively encountering a critical collision hazard (< 1.0m), prioritize safety reflex
+      if (detections.is_critical_hazard) {
+        return;
+      }
 
-    setSpokenSubtitles(narration);
-    safeSpeak(narration);
-  }, [detections, isGuidanceActive, isReadingText, isActive, safeSpeak]);
+      safeSpeak(desc);
+    }
+  }, [detections.new_gemini_guidance, detections.scene_description, detections.is_critical_hazard, isGuidanceActive, isReadingText, isActive, safeSpeak]);
 
   // Shared Video & Bounding Boxes
   const renderVideo = () => (
@@ -642,18 +708,33 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
                 </span>
               </div>
 
-              <button
-                onClick={() => {
-                  const nextMute = !isMuted;
-                  setIsMuted(nextMute);
-                  if (nextMute && typeof window !== 'undefined' && 'speechSynthesis' in window) {
-                    window.speechSynthesis.cancel();
-                  }
-                }}
-                className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-medium border border-white/15 cursor-pointer flex-shrink-0"
-              >
-                {isMuted ? '🔇 Unmute' : '🔊 Mute'}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setIsSonarEnabled(!isSonarEnabled)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold border cursor-pointer flex-shrink-0 flex items-center gap-1 transition-colors ${
+                    isSonarEnabled
+                      ? 'bg-purple-500/25 text-purple-300 border-purple-500/50 shadow-[0_0_10px_rgba(168,85,247,0.3)]'
+                      : 'bg-white/10 text-white/50 border-white/15'
+                  }`}
+                  title="Toggle Proximity Sonar Beep"
+                >
+                  <span>📡</span>
+                  <span>{isSonarEnabled ? 'Sonar ON' : 'Sonar OFF'}</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    const nextMute = !isMuted;
+                    setIsMuted(nextMute);
+                    if (nextMute && typeof window !== 'undefined' && 'speechSynthesis' in window) {
+                      window.speechSynthesis.cancel();
+                    }
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-medium border border-white/15 cursor-pointer flex-shrink-0"
+                >
+                  {isMuted ? '🔇 Unmute' : '🔊 Mute'}
+                </button>
+              </div>
             </div>
           </div>
 

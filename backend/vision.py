@@ -253,19 +253,23 @@ def detect_objects(frame: np.ndarray, conf_threshold: float = 0.45) -> list:
 
 def build_scene_narration(objects: list, emotions: list) -> dict:
     """
-    Build an intelligent scene narration for TTS.
-    Groups objects, prioritizes by distance, builds natural speech.
-    Returns: {narration: str, scene_key: str, changed: bool}
+    Build an intelligent, crisp scene narration for TTS.
+    Prioritizes the single closest/most critical obstacle in the walking path.
+    Prevents verbal clutter and cognitive overload.
+    Returns: {narration: str, scene_key: str, changed: bool, is_critical_hazard: bool, closest_distance_m: float}
     """
     global _last_scene_key, _last_scene_time
 
     if not objects and not emotions:
-        return {"narration": "", "scene_key": "", "changed": False}
+        return {
+            "narration": "",
+            "scene_key": "",
+            "changed": False,
+            "is_critical_hazard": False,
+            "closest_distance_m": None
+        }
 
-    parts = []
-
-    # ── Group objects by label+position to avoid repetition ──
-    # e.g., "3 chairs on your left" instead of "chair, chair, chair"
+    # Group objects by label+position to avoid repetition
     groups = {}
     for obj in objects:
         key = f"{obj['label']}_{obj['position']}"
@@ -285,55 +289,61 @@ def build_scene_narration(objects: list, emotions: list) -> dict:
             groups[key]["closest_m"] = obj["distance_m"]
             groups[key]["urgency"] = obj["urgency"]
 
-    # Sort groups by closest distance
-    sorted_groups = sorted(groups.values(), key=lambda g: g["closest_steps"])
+    # Sort groups by closest metric distance
+    sorted_groups = sorted(groups.values(), key=lambda g: g["closest_m"])
 
-    # Build speech for top 5 groups
-    for g in sorted_groups[:5]:
-        label = g["label"]
-        count = g["count"]
-        steps = g["closest_steps"]
-        pos = g["position"]
-        urgency = g["urgency"]
+    # Find the single most urgent hazard in the path:
+    # 1. Any obstacle <= 1.2m (critical collision hazard)
+    # 2. Obstacle directly ahead <= 2.2m (warning)
+    # 3. Obstacle on sides <= 1.5m
+    hazard = None
+    for g in sorted_groups:
+        if g["urgency"] == "critical" or g["closest_m"] <= 1.2:
+            hazard = g
+            break
+        elif g["position"] == "ahead" and g["closest_m"] <= 2.2:
+            hazard = g
+            break
+        elif g["closest_m"] <= 1.5:
+            hazard = g
+            break
 
-        # Pluralize
+    is_critical_hazard = False
+    narration = ""
+
+    if hazard:
+        label = hazard["label"]
+        count = hazard["count"]
+        pos = hazard["position"]
+        m = hazard["closest_m"]
         name = f"{count} {label}s" if count > 1 else label
 
-        # Build distance phrase
-        m = g["closest_m"]
-        if urgency == "critical":
-            parts.append(f"Caution! {name} {m} meters {pos}")
-        elif urgency == "warning":
-            parts.append(f"{name} about {m} meters {pos}")
+        if hazard["urgency"] == "critical" or m <= 1.2:
+            is_critical_hazard = True
+            narration = f"Watch out! {name} {m} meters {pos}."
+        elif hazard["urgency"] == "warning" or m <= 2.2:
+            narration = f"{name} {m} meters {pos}."
         else:
-            parts.append(f"{name} {m} meters {pos}")
+            narration = f"{name} {m} meters {pos}."
 
-    # ── Emotions ──
-    if emotions:
-        emo = emotions[0]
-        if emo.get("confidence", 0) > 60:
-            parts.append(f"person looks {emo['emotion']}")
-
-    narration = ". ".join(parts) + "." if parts else ""
-
-    # ── Scene change detection ──
-    # Build a simplified key from object labels + rough positions
-    scene_key = "|".join(
-        f"{g['label']}:{g['count']}:{g['position']}:{g['closest_steps']}"
-        for g in sorted_groups[:5]
-    )
-
+    # Scene change detection with throttle
     now = time.time()
-    changed = (scene_key != _last_scene_key) or (now - _last_scene_time > 8.0)
+    scene_key = f"{hazard['label']}:{round(hazard['closest_m'], 1)}:{hazard['position']}" if hazard else "clear"
+    time_threshold = 3.0 if is_critical_hazard else 6.0
+    changed = (scene_key != _last_scene_key) or (now - _last_scene_time > time_threshold)
 
     if changed:
         _last_scene_key = scene_key
         _last_scene_time = now
 
+    closest_m = min((o["distance_m"] for o in objects), default=None)
+
     return {
         "narration": narration,
         "scene_key": scene_key,
         "changed": changed,
+        "is_critical_hazard": is_critical_hazard,
+        "closest_distance_m": closest_m,
     }
 
 
@@ -423,6 +433,8 @@ def process_frame(base64_data: str) -> dict:
         "emotions": emotions,
         "narration": narration["narration"],
         "scene_changed": narration["changed"],
+        "is_critical_hazard": narration["is_critical_hazard"],
+        "closest_distance_m": narration["closest_distance_m"],
         "object_count": len(objects),
         "face_count": len(emotions),
     }

@@ -18,27 +18,27 @@ _last_description = ""
 _lock = threading.Lock()
 _initialized = False
 
-# Start at 4.5s interval for responsive navigation guidance
-_current_interval = 4.5
-MIN_INTERVAL = 4.5
-MAX_INTERVAL = 45.0  # Back off up to 45s on rate limit
+# Start at 3.5s interval for responsive, smooth navigation guidance
+_current_interval = 3.5
+MIN_INTERVAL = 3.5
+MAX_INTERVAL = 35.0  # Back off up to 35s on rate limit
 _rate_limited_until = 0.0  # Timestamp when rate limit expires
 
-SCENE_PROMPT = """You are a real-time live navigation guide for a visually impaired person holding their phone forward.
+SCENE_PROMPT = """You are a real-time live navigation guide for a visually impaired person walking forward with their phone.
 
-DETECTED OBJECTS (YOLO AI):
+DETECTED OBJECTS:
 {detections}
 
-Give a 1 to 2 sentence immediate spoken guide (under 30 words). Rules:
-1. START with the path ahead: state if path is clear or if there is an obstacle.
-2. If an obstacle is closer than 1.5m, immediately warn them (e.g. "Careful, chair 1 meter on your left").
-3. Use exact distance and position from the detections (e.g. "2 meters ahead", "to your right").
-4. Mention key landmarks or openings (doorway, hallway, stairs, sidewalk).
-5. Speak directly, concisely, and naturally as a walking guide. Do not say "In this image" or "I can see".
+Give an extremely concise directional walking cue in STRICTLY UNDER 10 WORDS.
+Rules:
+1. State walking path status first: e.g. "Path clear ahead", "Obstacle ahead, steer right", or "Clear path to left".
+2. If path is clear, state the main opening or target (e.g. "Doorway 3 meters straight", "Hallway open ahead").
+3. NEVER exceed 10 words. Every extra word delays and confuses a walking user.
+4. Do NOT say "I see", "There is", or "In this image". Speak direct and actionable navigation cues.
 
-Example: "Path is clear ahead. Doorway is straight ahead about 3 meters."
-Example: "Watch out, chair 1 meter on your left. Clear path to your right."
-Example: "Two people approaching 3 meters ahead on the walkway." """
+Example: "Path clear ahead. Doorway 3 meters straight."
+Example: "Obstacle ahead. Clear path to your right."
+Example: "Path open. Person approaching 3 meters ahead." """
 
 
 def _get_client():
@@ -134,8 +134,8 @@ def describe_scene(frame_base64: str, objects: List[dict] = None) -> Optional[st
                         types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
                     ],
                     config=types.GenerateContentConfig(
-                        max_output_tokens=90,
-                        temperature=0.2,
+                        max_output_tokens=35,
+                        temperature=0.1,
                     ),
                 )
                 description = response.text.strip()

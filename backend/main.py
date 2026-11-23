@@ -130,14 +130,16 @@ async def vision_endpoint(websocket: WebSocket):
     processing = False
     gemini_task = None
     last_gemini_description = ""
+    new_gemini_available = False
 
     async def run_gemini_background(frame_data, objects):
         """Run Gemini in background without blocking YOLO."""
-        nonlocal last_gemini_description
+        nonlocal last_gemini_description, new_gemini_available
         try:
             desc = await asyncio.to_thread(describe_scene, frame_data, objects)
-            if desc:
+            if desc and desc != last_gemini_description:
                 last_gemini_description = desc
+                new_gemini_available = True
         except Exception as e:
             print(f"❌ Gemini background error: {e}")
 
@@ -161,6 +163,9 @@ async def vision_endpoint(websocket: WebSocket):
 
                 # Attach latest Gemini description to response
                 result["scene_description"] = last_gemini_description
+                result["new_gemini_guidance"] = new_gemini_available
+                if new_gemini_available:
+                    new_gemini_available = False
 
                 await websocket.send_text(json.dumps(result))
             except WebSocketDisconnect:
