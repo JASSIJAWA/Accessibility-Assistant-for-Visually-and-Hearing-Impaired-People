@@ -84,7 +84,7 @@ function App() {
           <div className={`flex-1 flex flex-col lg:grid lg:grid-cols-[1.4fr_1fr] lg:grid-rows-[1.6fr_1fr] gap-3 h-full ${activeTab === 'vision' ? '' : 'hidden'}`}>
             {/* Camera Card */}
             <div className="lg:row-span-2 bg-[#14142d]/60 backdrop-blur-2xl border border-white/[0.07] rounded-2xl overflow-hidden flex flex-col min-h-[250px] sm:min-h-[300px] lg:min-h-0">
-              <CameraFeed onDetectionUpdate={handleDetectionUpdate} />
+              <CameraFeed onDetectionUpdate={handleDetectionUpdate} isActive={activeTab === 'vision'} />
             </div>
 
             {/* Transcript Card */}

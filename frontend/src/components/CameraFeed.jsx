@@ -8,11 +8,19 @@ const getWebSocketUrl = () => {
 const BACKEND_WS = getWebSocketUrl();
 const FRAME_INTERVAL = 200; // Send a frame every 200ms (5 FPS to backend)
 
-function CameraFeed({ onDetectionUpdate }) {
+function CameraFeed({ onDetectionUpdate, isActive = true }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const wsRef = useRef(null);
   const intervalRef = useRef(null);
+  const isActiveRef = useRef(isActive);
+
+  useEffect(() => {
+    isActiveRef.current = isActive;
+    if (!isActive && typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+  }, [isActive]);
 
   const [isStreaming, setIsStreaming] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
@@ -38,13 +46,13 @@ function CameraFeed({ onDetectionUpdate }) {
 
   // Start sending frames once streaming
   useEffect(() => {
-    let isActive = true;
+    let isRunning = true;
 
     const captureAndSend = async () => {
-      if (!isActive) return;
+      if (!isRunning) return;
       
-      // If ready, send a frame
-      if (isStreaming && isConnected && videoRef.current && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      // If ready and vision tab is active, send a frame
+      if (isActiveRef.current && isStreaming && isConnected && videoRef.current && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         const video = videoRef.current;
         const canvas = canvasRef.current;
         if (canvas && video.videoWidth > 0) {
@@ -65,7 +73,7 @@ function CameraFeed({ onDetectionUpdate }) {
     }
 
     return () => {
-      isActive = false;
+      isRunning = false;
       if (intervalRef.current) clearTimeout(intervalRef.current);
     };
   }, [isStreaming, isConnected]);
@@ -91,8 +99,8 @@ function CameraFeed({ onDetectionUpdate }) {
             if (onDetectionUpdate) onDetectionUpdate(result);
           }
           
-          // FAST LOOP: As soon as we get a result, instantly send the NEXT frame (if video is active)
-          if (videoRef.current && videoRef.current.readyState >= 2 && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          // FAST LOOP: As soon as we get a result, instantly send the NEXT frame (if vision is active)
+          if (isActiveRef.current && videoRef.current && videoRef.current.readyState >= 2 && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
             const video = videoRef.current;
             const canvas = canvasRef.current;
             if (canvas && video.videoWidth > 0) {
@@ -272,7 +280,12 @@ function CameraFeed({ onDetectionUpdate }) {
   // Gemini Scene Description — rich, natural descriptions (every ~6s)
   const lastGeminiRef = useRef('');
   useEffect(() => {
-    if (!narrationEnabled || isReadingText) return;
+    if (!isActive || !narrationEnabled || isReadingText) {
+      if (!isActive && typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+      return;
+    }
     const desc = detections.scene_description;
     if (!desc || desc === lastGeminiRef.current) return;
     lastGeminiRef.current = desc;
@@ -283,11 +296,11 @@ function CameraFeed({ onDetectionUpdate }) {
     utterance.rate = 1.05;
     utterance.volume = 1.0;
     window.speechSynthesis.speak(utterance);
-  }, [detections.scene_description, narrationEnabled, isReadingText]);
+  }, [detections.scene_description, narrationEnabled, isReadingText, isActive]);
 
   // YOLO Fallback Narrator — short alerts when Gemini hasn't spoken yet
   useEffect(() => {
-    if (!narrationEnabled || isReadingText) return;
+    if (!isActive || !narrationEnabled || isReadingText) return;
     if (!detections.narration || !detections.scene_changed) return;
     // Skip if Gemini already provided a description recently
     if (detections.scene_description) return;
@@ -304,7 +317,7 @@ function CameraFeed({ onDetectionUpdate }) {
     utterance.rate = 1.15;
     utterance.volume = 0.9;
     window.speechSynthesis.speak(utterance);
-  }, [detections, narrationEnabled, isReadingText]);
+  }, [detections, narrationEnabled, isReadingText, isActive]);
 
   return (
     <>
