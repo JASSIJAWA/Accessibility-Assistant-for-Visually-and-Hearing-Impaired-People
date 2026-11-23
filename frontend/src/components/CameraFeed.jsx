@@ -33,6 +33,11 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
   const [spokenSubtitles, setSpokenSubtitles] = useState('');
   const [isMuted, setIsMuted] = useState(false);
 
+  // Flashlight / Torch State
+  const [isTorchOn, setIsTorchOn] = useState(false);
+  const [hasTorch, setHasTorch] = useState(false);
+  const mediaStreamRef = useRef(null);
+
   // OCR State
   const [isReadingText, setIsReadingText] = useState(false);
   const [recognizedText, setRecognizedText] = useState(null);
@@ -161,11 +166,16 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
   }, [onDetectionUpdate, sendCurrentFrame]);
 
   const stopCamera = () => {
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((t) => t.stop());
+      mediaStreamRef.current = null;
+    }
     if (videoRef.current && videoRef.current.srcObject) {
       videoRef.current.srcObject.getTracks().forEach((t) => t.stop());
       videoRef.current.srcObject = null;
       setIsStreaming(false);
     }
+    setIsTorchOn(false);
   };
 
   // Start webcam
@@ -186,6 +196,13 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
         audio: false,
       });
 
+      mediaStreamRef.current = stream;
+      const track = stream.getVideoTracks()[0];
+      if (track) {
+        const capabilities = track.getCapabilities?.() || {};
+        setHasTorch(Boolean(capabilities.torch));
+      }
+
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         videoRef.current.onloadedmetadata = () => {
@@ -205,6 +222,13 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
           video: { facingMode: mode },
           audio: false,
         });
+        mediaStreamRef.current = stream;
+        const track = stream.getVideoTracks()[0];
+        if (track) {
+          const capabilities = track.getCapabilities?.() || {};
+          setHasTorch(Boolean(capabilities.torch));
+        }
+
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           videoRef.current.onloadedmetadata = () => {
@@ -224,8 +248,31 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
 
   const toggleCamera = () => {
     const nextMode = facingMode === 'environment' ? 'user' : 'environment';
+    setIsTorchOn(false);
     setFacingMode(nextMode);
     startCamera(nextMode);
+  };
+
+  // Toggle Hardware Flashlight (Torch) with Screen Illumination Fallback
+  const toggleTorch = async () => {
+    const track = mediaStreamRef.current?.getVideoTracks()[0];
+    const nextState = !isTorchOn;
+
+    if (track) {
+      try {
+        const capabilities = track.getCapabilities?.() || {};
+        if (capabilities.torch) {
+          await track.applyConstraints({
+            advanced: [{ torch: nextState }]
+          });
+        }
+      } catch (err) {
+        console.warn("Hardware torch error:", err);
+      }
+    }
+
+    setIsTorchOn(nextState);
+    safeSpeak(nextState ? "Flashlight on." : "Flashlight off.");
   };
 
   // Guidance Toggle (Switches Fullscreen in App + Starts Spoken Guide)
@@ -466,6 +513,19 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
 
             <div className="flex items-center gap-2">
               <button
+                onClick={toggleTorch}
+                className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 backdrop-blur-md transition-all cursor-pointer ${
+                  isTorchOn
+                    ? 'bg-amber-400 text-black border-amber-300 shadow-[0_0_20px_rgba(251,191,36,0.8)] animate-pulse'
+                    : 'bg-white/10 hover:bg-white/20 border-white/20 text-white'
+                }`}
+                title={isTorchOn ? "Turn Flashlight OFF" : "Turn Flashlight ON"}
+              >
+                <span>🔦</span>
+                <span>{isTorchOn ? 'LIGHT ON' : 'TORCH'}</span>
+              </button>
+
+              <button
                 onClick={toggleCamera}
                 className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-white text-xs font-semibold flex items-center gap-1.5 backdrop-blur-md transition-all cursor-pointer"
                 title="Switch Camera"
@@ -612,6 +672,19 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
               <h2 className="text-sm font-semibold text-gray-200">Vision Assistant</h2>
             </div>
             <div className="flex items-center gap-2">
+              <button
+                onClick={toggleTorch}
+                className={`p-1.5 rounded-lg border transition-colors text-xs flex items-center gap-1 px-2.5 cursor-pointer ${
+                  isTorchOn
+                    ? 'bg-amber-400 text-black border-amber-300 shadow-[0_0_12px_rgba(251,191,36,0.6)] font-bold'
+                    : 'bg-white/5 border-white/10 hover:bg-white/10 text-white'
+                }`}
+                title={isTorchOn ? "Turn Flashlight OFF" : "Turn Flashlight ON"}
+              >
+                <span>🔦</span>
+                <span className="hidden sm:inline">{isTorchOn ? 'LIGHT ON' : 'Torch'}</span>
+              </button>
+
               <button
                 onClick={toggleCamera}
                 className="p-1.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition-colors text-white text-xs flex items-center gap-1 px-2.5 cursor-pointer"
