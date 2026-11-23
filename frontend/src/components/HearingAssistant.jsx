@@ -140,7 +140,14 @@ function HearingAssistant() {
     setRecordSeconds(0);
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          channelCount: 1,
+        }
+      });
 
       const mimeType = MediaRecorder.isTypeSupported('audio/webm')
         ? 'audio/webm'

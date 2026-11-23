@@ -27,9 +27,9 @@ def get_whisper():
     global _whisper_model
     if _whisper_model is None:
         from faster_whisper import WhisperModel
-        print("⚡ Loading Faster-Whisper tiny.en model on CPU...")
-        _whisper_model = WhisperModel("tiny.en", device="cpu", compute_type="int8")
-        print("✅ Faster-Whisper ready for real-time speech transcription!")
+        print("⚡ Loading Faster-Whisper base.en model on CPU...")
+        _whisper_model = WhisperModel("base.en", device="cpu", compute_type="int8")
+        print("✅ Faster-Whisper base.en ready for accurate speech transcription!")
     return _whisper_model
 
 
@@ -127,13 +127,22 @@ def _parse_gemini_json(raw_text: str) -> dict:
 
 def transcribe_audio_bytes(audio_bytes: bytes) -> str:
     """
-    Transcribes audio bytes locally using faster-whisper.
-    Runs in ~100ms on CPU with zero cloud latency.
+    Transcribes audio bytes locally using faster-whisper base.en model.
+    Uses beam search (beam_size=5) and VAD filtering for high accuracy.
     """
     try:
         whisper = get_whisper()
         buf = io.BytesIO(audio_bytes)
-        segments, _ = whisper.transcribe(buf, beam_size=1, language="en", vad_filter=True)
+        segments, _ = whisper.transcribe(
+            buf,
+            beam_size=5,
+            best_of=5,
+            language="en",
+            temperature=[0.0, 0.2],
+            vad_filter=True,
+            vad_parameters=dict(min_silence_duration_ms=400),
+            initial_prompt="A clear spoken conversation about daily life, navigation, questions, directions, and emergencies."
+        )
         text = " ".join(seg.text.strip() for seg in segments).strip()
         return text
     except Exception as e:
