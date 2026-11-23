@@ -7,7 +7,7 @@ const getWebSocketUrl = () => {
 
 const BACKEND_WS = getWebSocketUrl();
 
-function CameraFeed({ onDetectionUpdate, isActive = true }) {
+function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = false, onToggleGuidance }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const wsRef = useRef(null);
@@ -29,22 +29,13 @@ function CameraFeed({ onDetectionUpdate, isActive = true }) {
   const [error, setError] = useState(null);
   const [detections, setDetections] = useState({ objects: [], emotions: [] });
 
-  // Fullscreen & Guidance State
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  // Guidance audio and subtitle state
   const [spokenSubtitles, setSpokenSubtitles] = useState('');
-  const [narrationEnabled, setNarrationEnabled] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
 
   // OCR State
   const [isReadingText, setIsReadingText] = useState(false);
   const [recognizedText, setRecognizedText] = useState(null);
-
-  // OCR Debug State
-  const [ocrDebug, setOcrDebug] = useState({
-    imageUrl: null,
-    rawText: null,
-    confidence: null,
-    filteredText: null
-  });
 
   const lastGeminiRef = useRef('');
   const narrationTimerRef = useRef(null);
@@ -52,27 +43,60 @@ function CameraFeed({ onDetectionUpdate, isActive = true }) {
   const [facingMode, setFacingMode] = useState('environment');
   const [aspectRatio, setAspectRatio] = useState(4/3);
 
-  // Start sending frames once streaming
+  // Safe TTS Speak Helper with Chrome Android resume support
+  const safeSpeak = useCallback((text) => {
+    if (isMuted || !text || typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    try {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1.05;
+      utterance.volume = 1.0;
+      if (window.speechSynthesis.paused) {
+        window.speechSynthesis.resume();
+      }
+      window.speechSynthesis.speak(utterance);
+    } catch (e) {
+      console.warn("TTS Error:", e);
+    }
+  }, [isMuted]);
+
+  // Downsample and send frame to backend
+  const sendCurrentFrame = useCallback(() => {
+    if (!isActiveRef.current || !videoRef.current || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!canvas || video.videoWidth === 0) return;
+
+    // Scale to max 640px for ultra-low latency frame transmission (~25KB)
+    const maxDim = 640;
+    let targetW = video.videoWidth;
+    let targetH = video.videoHeight;
+    if (targetW > maxDim || targetH > maxDim) {
+      if (targetW >= targetH) {
+        targetH = Math.round((targetH * maxDim) / targetW);
+        targetW = maxDim;
+      } else {
+        targetW = Math.round((targetW * maxDim) / targetH);
+        targetH = maxDim;
+      }
+    }
+    canvas.width = targetW;
+    canvas.height = targetH;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, targetW, targetH);
+    const base64 = canvas.toDataURL('image/jpeg', 0.55);
+    wsRef.current.send(base64);
+  }, []);
+
+  // Frame capture loop
   useEffect(() => {
     let isRunning = true;
 
-    const captureAndSend = async () => {
+    const captureAndSend = () => {
       if (!isRunning) return;
-
-      // If ready and vision tab is active, send a frame
-      if (isActiveRef.current && isStreaming && isConnected && videoRef.current && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        const video = videoRef.current;
-        const canvas = canvasRef.current;
-        if (canvas && video.videoWidth > 0) {
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(video, 0, 0);
-          const base64 = canvas.toDataURL('image/jpeg', 0.5);
-          wsRef.current.send(base64);
-        }
+      if (isStreaming && isConnected) {
+        sendCurrentFrame();
       }
-
       intervalRef.current = setTimeout(captureAndSend, 1000);
     };
 
@@ -84,7 +108,7 @@ function CameraFeed({ onDetectionUpdate, isActive = true }) {
       isRunning = false;
       if (intervalRef.current) clearTimeout(intervalRef.current);
     };
-  }, [isStreaming, isConnected]);
+  }, [isStreaming, isConnected, sendCurrentFrame]);
 
   // Connect to backend WebSocket
   const connectWebSocket = useCallback(() => {
@@ -104,26 +128,15 @@ function CameraFeed({ onDetectionUpdate, isActive = true }) {
             if (onDetectionUpdate) onDetectionUpdate(result);
           }
 
-          // FAST LOOP: As soon as we get a result, instantly send the NEXT frame
+          // FAST LOOP: Instantly send next frame once processed
           if (isActiveRef.current && videoRef.current && videoRef.current.readyState >= 2 && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-            const video = videoRef.current;
-            const canvas = canvasRef.current;
-            if (canvas && video.videoWidth > 0) {
-              canvas.width = video.videoWidth;
-              canvas.height = video.videoHeight;
-              const ctx = canvas.getContext('2d');
-              ctx.drawImage(video, 0, 0);
-              const base64 = canvas.toDataURL('image/jpeg', 0.5);
-              wsRef.current.send(base64);
+            sendCurrentFrame();
 
-              // Reset fallback timeout
-              if (intervalRef.current) clearTimeout(intervalRef.current);
-              intervalRef.current = setTimeout(() => {
-                if (isActiveRef.current && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-                  wsRef.current.send(base64);
-                }
-              }, 1000);
-            }
+            // Clear fallback timeout
+            if (intervalRef.current) clearTimeout(intervalRef.current);
+            intervalRef.current = setTimeout(() => {
+              sendCurrentFrame();
+            }, 1000);
           }
         } catch (e) {
           console.error('Failed to parse AI result:', e);
@@ -145,7 +158,7 @@ function CameraFeed({ onDetectionUpdate, isActive = true }) {
       console.error('WebSocket connection failed:', e);
       setIsConnected(false);
     }
-  }, [onDetectionUpdate]);
+  }, [onDetectionUpdate, sendCurrentFrame]);
 
   const stopCamera = () => {
     if (videoRef.current && videoRef.current.srcObject) {
@@ -215,34 +228,29 @@ function CameraFeed({ onDetectionUpdate, isActive = true }) {
     startCamera(nextMode);
   };
 
-  // ─── Guidance Toggle (Starts Fullscreen + Voice Guidance) ──────────────────
-  const toggleGuidance = () => {
-    if (narrationEnabled) {
-      setNarrationEnabled(false);
-      setIsFullscreen(false);
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-      }
-    } else {
-      setNarrationEnabled(true);
-      setIsFullscreen(true);
+  // Guidance Toggle (Switches Fullscreen in App + Starts Spoken Guide)
+  const handleToggleGuidance = () => {
+    const willBeActive = !isGuidanceActive;
+    if (onToggleGuidance) {
+      onToggleGuidance(willBeActive);
+    }
+
+    if (willBeActive) {
       const startMsg = "Guidance started. Point camera forward.";
       setSpokenSubtitles(startMsg);
+      safeSpeak(startMsg);
+    } else {
       if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
         window.speechSynthesis.cancel();
-        const utterance = new SpeechSynthesisUtterance(startMsg);
-        utterance.rate = 1.1;
-        window.speechSynthesis.speak(utterance);
       }
     }
   };
 
-  // Keyboard Escape listener
+  // Keyboard Escape listener to exit fullscreen guidance
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.key === 'Escape' && isFullscreen) {
-        setIsFullscreen(false);
-        setNarrationEnabled(false);
+      if (e.key === 'Escape' && isGuidanceActive) {
+        if (onToggleGuidance) onToggleGuidance(false);
         if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
           window.speechSynthesis.cancel();
         }
@@ -250,7 +258,7 @@ function CameraFeed({ onDetectionUpdate, isActive = true }) {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isFullscreen]);
+  }, [isGuidanceActive, onToggleGuidance]);
 
   // Capture frame and call OCR endpoint
   const handleReadText = async () => {
@@ -283,32 +291,15 @@ function CameraFeed({ onDetectionUpdate, isActive = true }) {
       }
 
       const isAccepted = data.accepted && data.text && data.text.trim().length > 0;
-      setRecognizedText(isAccepted ? data.text : "No clear text detected. Hold camera steady.");
-
-      const wordDetails = (data.results || []).map(r => ({
-        text: r.text,
-        confidence: r.confidence,
-        accepted: r.accepted
-      }));
-
-      setOcrDebug({
-        imageUrl,
-        rawText: (data.results || []).map(r => r.text).join(' '),
-        confidence: wordDetails.length > 0 ? Math.round(wordDetails.reduce((sum, w) => sum + w.confidence, 0) / wordDetails.length) : 0,
-        filteredText: isAccepted ? data.text : '',
-        status: isAccepted ? 'ACCEPTED' : 'REJECTED',
-        wordDetails
-      });
+      const textToAnnounce = isAccepted ? data.text : "No clear text detected. Hold camera steady.";
+      setRecognizedText(textToAnnounce);
 
       if (isAccepted) {
         let speakableText = data.text;
         if (speakableText.length > 200) {
           speakableText = speakableText.substring(0, 200) + "... and more.";
         }
-        window.speechSynthesis.cancel();
-        const utterance = new SpeechSynthesisUtterance(speakableText);
-        utterance.rate = 1.0;
-        window.speechSynthesis.speak(utterance);
+        safeSpeak(speakableText);
       }
 
     } catch (err) {
@@ -331,51 +322,41 @@ function CameraFeed({ onDetectionUpdate, isActive = true }) {
     };
   }, []);
 
-  // Gemini Scene Description — rich, natural guidance
+  // Gemini Scene Description Guidance
   useEffect(() => {
-    if (!isActive || !narrationEnabled || isReadingText) {
-      if (!isActive && typeof window !== 'undefined' && 'speechSynthesis' in window) {
+    if (!isActive || !isGuidanceActive || isReadingText) {
+      if (!isGuidanceActive && typeof window !== 'undefined' && 'speechSynthesis' in window) {
         window.speechSynthesis.cancel();
       }
       return;
     }
+
     const desc = detections.scene_description;
     if (!desc || desc === lastGeminiRef.current) return;
     lastGeminiRef.current = desc;
     setSpokenSubtitles(desc);
+    safeSpeak(desc);
+  }, [detections.scene_description, isGuidanceActive, isReadingText, isActive, safeSpeak]);
 
-    // Gemini descriptions get priority
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(desc);
-    utterance.rate = 1.05;
-    utterance.volume = 1.0;
-    window.speechSynthesis.speak(utterance);
-  }, [detections.scene_description, narrationEnabled, isReadingText, isActive]);
-
-  // YOLO Fallback Narrator — short alerts when Gemini hasn't spoken yet
+  // YOLO Fallback Immediate Obstacle Alert (< 1.5m)
   useEffect(() => {
-    if (!isActive || !narrationEnabled || isReadingText) return;
+    if (!isActive || !isGuidanceActive || isReadingText) return;
     if (!detections.narration || !detections.scene_changed) return;
     if (detections.scene_description) return;
 
     const narration = detections.narration;
-
     if (narrationTimerRef.current) return;
     narrationTimerRef.current = setTimeout(() => {
       narrationTimerRef.current = null;
     }, 4000);
 
     setSpokenSubtitles(narration);
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(narration);
-    utterance.rate = 1.15;
-    utterance.volume = 0.9;
-    window.speechSynthesis.speak(utterance);
-  }, [detections, narrationEnabled, isReadingText, isActive]);
+    safeSpeak(narration);
+  }, [detections, isGuidanceActive, isReadingText, isActive, safeSpeak]);
 
-  // Shared Video & Overlays Component
-  const renderVideoAndOverlays = (isFs) => (
-    <div className={`relative flex-1 w-full h-full min-h-0 flex items-center justify-center overflow-hidden ${isFs ? 'bg-black' : 'bg-[#050510]'}`}>
+  // Shared Video & Bounding Boxes
+  const renderVideo = () => (
+    <div className={`relative flex-1 w-full h-full min-h-0 flex items-center justify-center overflow-hidden ${isGuidanceActive ? 'bg-black' : 'bg-[#050510]'}`}>
       {error ? (
         <div className="absolute inset-0 flex items-center justify-center text-center text-red-400 p-8 z-10">
           <div>
@@ -390,9 +371,10 @@ function CameraFeed({ onDetectionUpdate, isActive = true }) {
         </div>
       ) : (
         <div
-          className="relative flex-shrink-0"
+          className="relative flex items-center justify-center"
           style={{
             aspectRatio: aspectRatio,
+            width: isGuidanceActive ? '100%' : 'auto',
             maxHeight: '100%',
             maxWidth: '100%'
           }}
@@ -412,7 +394,6 @@ function CameraFeed({ onDetectionUpdate, isActive = true }) {
 
           {/* AI Bounding Box Overlays */}
           <div className={`absolute inset-0 pointer-events-none ${facingMode === 'user' ? '-scale-x-100' : ''}`}>
-            {/* Object boxes — color coded by urgency */}
             {detections.objects?.map((obj, i) => {
               const fs = detections.frame_size;
               if (!fs) return null;
@@ -423,8 +404,8 @@ function CameraFeed({ onDetectionUpdate, isActive = true }) {
                 height: `${((obj.box.y2 - obj.box.y1) / fs.height) * 100}%`,
               };
               const urgencyColors = {
-                critical: 'border-red-500 bg-red-600/90 shadow-[0_0_12px_rgba(239,68,68,0.6)]',
-                warning:  'border-amber-400 bg-amber-500/90 shadow-[0_0_10px_rgba(245,158,11,0.5)]',
+                critical: 'border-red-500 bg-red-600/90 shadow-[0_0_15px_rgba(239,68,68,0.7)]',
+                warning:  'border-amber-400 bg-amber-500/90 shadow-[0_0_12px_rgba(245,158,11,0.6)]',
                 info:     'border-emerald-400 bg-emerald-500/80',
                 background: 'border-gray-400 bg-gray-500/70',
               };
@@ -432,15 +413,14 @@ function CameraFeed({ onDetectionUpdate, isActive = true }) {
               const [borderColor, bgColor] = colors.split(' ');
               const distText = obj.distance_m ? `${obj.distance_m}m` : `~${obj.distance_steps}steps`;
               return (
-                <div key={`obj-${i}`} className={`absolute border-2 ${borderColor} rounded-sm transition-all duration-300 ease-linear`} style={style}>
-                  <span className={`absolute -top-5 left-0 ${bgColor} text-white font-bold text-[0.62rem] md:text-[0.68rem] px-1.5 py-0.5 rounded whitespace-nowrap ${facingMode === 'user' ? '-scale-x-100' : ''}`}>
+                <div key={`obj-${i}`} className={`absolute border-2 ${borderColor} rounded-md transition-all duration-300 ease-linear`} style={style}>
+                  <span className={`absolute -top-5 left-0 ${bgColor} text-white font-bold text-[0.62rem] md:text-[0.68rem] px-1.5 py-0.5 rounded whitespace-nowrap shadow ${facingMode === 'user' ? '-scale-x-100' : ''}`}>
                     {obj.urgency === 'critical' ? '⚠️ ' : ''}{obj.label} • {distText} {obj.position ? `(${obj.position})` : ''}
                   </span>
                 </div>
               );
             })}
 
-            {/* Emotion boxes */}
             {detections.emotions?.map((face, i) => {
               const fs = detections.frame_size;
               if (!fs) return null;
@@ -450,21 +430,9 @@ function CameraFeed({ onDetectionUpdate, isActive = true }) {
                 width: `${(face.box.w / fs.width) * 100}%`,
                 height: `${(face.box.h / fs.height) * 100}%`,
               };
-              const emotionColors = {
-                happy: 'border-yellow-400 bg-yellow-500/80',
-                sad: 'border-blue-400 bg-blue-500/80',
-                angry: 'border-red-400 bg-red-500/80',
-                surprise: 'border-pink-400 bg-pink-500/80',
-                fear: 'border-orange-400 bg-orange-500/80',
-                disgust: 'border-green-400 bg-green-500/80',
-                neutral: 'border-gray-400 bg-gray-500/80',
-              };
-              const colors = emotionColors[face.emotion] || 'border-purple-400 bg-purple-500/80';
-              const [borderColor, bgColor] = colors.split(' ');
-
               return (
-                <div key={`emo-${i}`} className={`absolute border-2 ${borderColor} rounded-sm transition-all duration-300 ease-linear`} style={style}>
-                  <span className={`absolute -top-5 left-0 ${bgColor} text-white font-bold text-[0.62rem] px-1.5 py-0.5 rounded whitespace-nowrap ${facingMode === 'user' ? '-scale-x-100' : ''}`}>
+                <div key={`emo-${i}`} className="absolute border-2 border-yellow-400 rounded-md transition-all duration-300 ease-linear" style={style}>
+                  <span className={`absolute -top-5 left-0 bg-yellow-500 text-black font-bold text-[0.62rem] px-1.5 py-0.5 rounded whitespace-nowrap ${facingMode === 'user' ? '-scale-x-100' : ''}`}>
                     {face.emotion} {Math.round(face.confidence)}%
                   </span>
                 </div>
@@ -482,20 +450,17 @@ function CameraFeed({ onDetectionUpdate, isActive = true }) {
       <canvas ref={canvasRef} className="hidden" />
 
       {/* ═══════════════════════════════════════════════════════════════════════
-          FULLSCREEN GUIDANCE MODE (Active when isFullscreen is true)
+          FULLSCREEN GUIDANCE VIEW (Takes 100% of Mobile Screen)
           ═══════════════════════════════════════════════════════════════════════ */}
-      {isFullscreen ? (
-        <div className="fixed inset-0 z-50 bg-black flex flex-col w-full h-[100dvh] overflow-hidden select-none">
+      {isGuidanceActive ? (
+        <div className="relative w-full h-full flex flex-col bg-black overflow-hidden select-none">
 
-          {/* Top HUD Floating Control Bar */}
-          <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between p-3 md:p-4 bg-gradient-to-b from-black/90 via-black/60 to-transparent pointer-events-auto">
+          {/* Top Floating Control Bar */}
+          <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between p-3 md:p-4 bg-gradient-to-b from-black/95 via-black/70 to-transparent pointer-events-auto">
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
               <span className="text-xs md:text-sm font-bold text-emerald-300 bg-emerald-950/80 border border-emerald-500/40 px-3 py-1 rounded-full shadow-lg">
                 ● GEMINI LIVE GUIDANCE
-              </span>
-              <span className="text-[0.68rem] text-white/50 bg-black/40 px-2 py-0.5 rounded border border-white/10 hidden sm:inline">
-                {facingMode === 'environment' ? 'Rear Cam' : 'Front Cam'}
               </span>
             </div>
 
@@ -512,17 +477,17 @@ function CameraFeed({ onDetectionUpdate, isActive = true }) {
               <button
                 onClick={handleReadText}
                 disabled={isReadingText}
-                className="px-3 py-1.5 rounded-xl bg-blue-600/90 hover:bg-blue-600 border border-blue-400/50 text-white text-xs font-semibold flex items-center gap-1.5 backdrop-blur-md transition-all shadow-lg shadow-blue-500/20 cursor-pointer"
-                title="Read Text via OCR"
+                className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 border border-blue-400 text-white text-xs font-semibold flex items-center gap-1.5 backdrop-blur-md transition-all shadow-lg shadow-blue-500/30 cursor-pointer"
+                title="Read Text in Front"
               >
                 <span>📖</span>
                 <span>{isReadingText ? 'Reading...' : 'Read Text'}</span>
               </button>
 
               <button
-                onClick={toggleGuidance}
+                onClick={handleToggleGuidance}
                 className="px-3.5 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 border border-red-400 text-white text-xs font-bold flex items-center gap-1.5 shadow-[0_0_15px_rgba(239,68,68,0.5)] transition-all cursor-pointer"
-                title="Stop Guidance and Exit Fullscreen"
+                title="Stop Guidance and Return to Dashboard"
               >
                 <span>✕</span>
                 <span>GUIDE OFF</span>
@@ -534,15 +499,15 @@ function CameraFeed({ onDetectionUpdate, isActive = true }) {
           {(detections.scene_description || spokenSubtitles) && (
             <div className="absolute top-16 md:top-20 left-3 right-3 md:left-1/2 md:-translate-x-1/2 md:max-w-2xl z-20 pointer-events-none">
               <div className="bg-black/85 backdrop-blur-xl border border-purple-500/50 rounded-2xl p-3 md:p-4 shadow-[0_0_30px_rgba(168,85,247,0.4)] flex items-start gap-3">
-                <span className="text-2xl flex-shrink-0">🧠</span>
+                <span className="text-2xl flex-shrink-0 animate-pulse">🧠</span>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-[0.65rem] font-bold uppercase tracking-wider text-purple-300">
-                      Gemini Real-Time Guide:
+                      Gemini Live Navigation:
                     </span>
                     <span className="text-[0.62rem] text-emerald-400 font-mono flex items-center gap-1">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
-                      Speaking
+                      Guiding
                     </span>
                   </div>
                   <p className="text-sm md:text-base font-semibold text-gray-100 leading-relaxed tracking-wide">
@@ -553,19 +518,19 @@ function CameraFeed({ onDetectionUpdate, isActive = true }) {
             </div>
           )}
 
-          {/* Fullscreen Video Area */}
-          {renderVideoAndOverlays(true)}
+          {/* Fullscreen Camera Stream */}
+          {renderVideo()}
 
-          {/* OCR Result Floating Modal (in Fullscreen) */}
+          {/* Floating OCR Result in Fullscreen */}
           {recognizedText && (
-            <div className="absolute inset-x-4 top-24 z-30 bg-blue-950/90 backdrop-blur-xl border border-blue-400/50 rounded-2xl p-4 shadow-2xl">
+            <div className="absolute inset-x-4 top-24 z-30 bg-blue-950/95 backdrop-blur-xl border border-blue-400/50 rounded-2xl p-4 shadow-2xl">
               <div className="flex items-center justify-between mb-1.5">
                 <span className="text-xs font-bold text-blue-300 uppercase tracking-wider flex items-center gap-1.5">
                   <span>📖</span> Detected Text (OCR)
                 </span>
                 <button
                   onClick={() => setRecognizedText(null)}
-                  className="text-white/60 hover:text-white text-xs font-bold px-2 py-1 bg-white/10 rounded-lg cursor-pointer"
+                  className="text-white/60 hover:text-white text-xs font-bold px-2.5 py-1 bg-white/10 rounded-lg cursor-pointer"
                 >
                   ✕ Close
                 </button>
@@ -577,8 +542,8 @@ function CameraFeed({ onDetectionUpdate, isActive = true }) {
           )}
 
           {/* Bottom Floating Obstacle Radar Bar */}
-          <div className="absolute bottom-0 left-0 right-0 z-20 p-3 md:p-4 bg-gradient-to-t from-black/95 via-black/70 to-transparent flex flex-col gap-2 pointer-events-auto">
-            {/* Detected Obstacles Chips */}
+          <div className="absolute bottom-0 left-0 right-0 z-20 p-3 md:p-4 bg-gradient-to-t from-black/95 via-black/75 to-transparent flex flex-col gap-2 pointer-events-auto">
+            {/* Obstacle Radar Chips */}
             {detections.objects && detections.objects.length > 0 && (
               <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
                 <span className="text-[0.65rem] text-white/50 font-bold uppercase flex-shrink-0 mr-1">
@@ -608,7 +573,7 @@ function CameraFeed({ onDetectionUpdate, isActive = true }) {
               </div>
             )}
 
-            {/* Bottom Status & Controls */}
+            {/* Subtitle & Mute Bar */}
             <div className="flex items-center justify-between gap-3 pt-1 border-t border-white/10">
               <div className="flex items-center gap-2 text-xs text-white/70 min-w-0">
                 <span className="text-base flex-shrink-0">🔊</span>
@@ -617,23 +582,18 @@ function CameraFeed({ onDetectionUpdate, isActive = true }) {
                 </span>
               </div>
 
-              <div className="flex items-center gap-2 flex-shrink-0">
-                <button
-                  onClick={() => {
-                    setNarrationEnabled(!narrationEnabled);
-                    if (narrationEnabled) window.speechSynthesis.cancel();
-                  }}
-                  className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-medium border border-white/15 cursor-pointer"
-                >
-                  {narrationEnabled ? '🔊 Mute' : '🔇 Unmute'}
-                </button>
-                <button
-                  onClick={() => setIsFullscreen(false)}
-                  className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-medium border border-white/15 cursor-pointer"
-                >
-                  ⛶ Minimize
-                </button>
-              </div>
+              <button
+                onClick={() => {
+                  const nextMute = !isMuted;
+                  setIsMuted(nextMute);
+                  if (nextMute && typeof window !== 'undefined' && 'speechSynthesis' in window) {
+                    window.speechSynthesis.cancel();
+                  }
+                }}
+                className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-medium border border-white/15 cursor-pointer flex-shrink-0"
+              >
+                {isMuted ? '🔇 Unmute' : '🔊 Mute'}
+              </button>
             </div>
           </div>
 
@@ -641,11 +601,11 @@ function CameraFeed({ onDetectionUpdate, isActive = true }) {
       ) : (
 
         /* ═════════════════════════════════════════════════════════════════════
-           NORMAL DASHBOARD CARD MODE (When isFullscreen is false)
+           DASHBOARD CARD VIEW (Normal View)
            ═════════════════════════════════════════════════════════════════════ */
         <div className="flex flex-col h-full overflow-hidden">
 
-          {/* Header */}
+          {/* Card Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-white/5 flex-shrink-0">
             <div className="flex items-center gap-2 flex-1">
               <span className="text-lg">👁️</span>
@@ -661,15 +621,6 @@ function CameraFeed({ onDetectionUpdate, isActive = true }) {
                 <span className="hidden sm:inline">{facingMode === 'environment' ? 'Rear' : 'Front'}</span>
               </button>
 
-              <button
-                onClick={() => setIsFullscreen(true)}
-                className="p-1.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition-colors text-white text-xs flex items-center gap-1 px-2.5 cursor-pointer"
-                title="Expand Camera to Fullscreen"
-              >
-                <span>⛶</span>
-                <span className="hidden sm:inline">Expand</span>
-              </button>
-
               <div className="flex items-center gap-1.5 ml-1">
                 <span className={`text-[0.6rem] px-2 py-0.5 rounded-full font-medium ${
                   isConnected
@@ -683,8 +634,8 @@ function CameraFeed({ onDetectionUpdate, isActive = true }) {
             </div>
           </div>
 
-          {/* Video in Card */}
-          {renderVideoAndOverlays(false)}
+          {/* Camera Feed inside Card */}
+          {renderVideo()}
 
           {/* Gemini Scene Description Bar */}
           {detections.scene_description && (
@@ -715,10 +666,10 @@ function CameraFeed({ onDetectionUpdate, isActive = true }) {
             </div>
           )}
 
-          {/* Main Action Bar */}
+          {/* Action Bar */}
           <div className="px-4 py-3 border-t border-white/10 bg-[#0c0c22] flex-shrink-0 flex items-center gap-2.5">
             <button
-              onClick={toggleGuidance}
+              onClick={handleToggleGuidance}
               className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-amber-600 via-orange-600 to-amber-700 hover:from-amber-500 hover:to-orange-500 border border-amber-400 text-white font-bold text-xs sm:text-sm shadow-[0_0_20px_rgba(245,158,11,0.35)] flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-95"
             >
               <span className="text-base sm:text-lg">🔊</span>
