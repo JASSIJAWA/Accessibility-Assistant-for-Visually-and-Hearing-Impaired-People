@@ -213,10 +213,16 @@ async def hearing_endpoint(websocket: WebSocket):
 
     async def run_audio_analysis(audio_bytes: bytes, mime_type: str):
         try:
-            result = await asyncio.to_thread(process_audio_chunk, audio_bytes, mime_type)
+            clean_mime = mime_type.split(";")[0].strip() if mime_type else "audio/webm"
+            result = await asyncio.to_thread(process_audio_chunk, audio_bytes, clean_mime)
             await websocket.send_text(json.dumps(result))
         except Exception as e:
             print(f"❌ Audio analysis error: {e}")
+            await websocket.send_text(json.dumps({
+                "error": str(e),
+                "summary": "Could not transcribe audio.",
+                "transcription": ""
+            }))
 
     try:
         while True:

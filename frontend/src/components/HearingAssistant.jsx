@@ -7,28 +7,33 @@ const getHearingWsUrl = () => {
 
 function HearingAssistant() {
   const wsRef = useRef(null);
-  const mediaRecorderRef = useRef(null);
-  const audioStreamRef = useRef(null);
   const recognitionRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const recordTimerRef = useRef(null);
+  const processingTimeoutRef = useRef(null);
 
-  const [isListening, setIsListening] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
+  const [isLiveListening, setIsLiveListening] = useState(false);
+  const [isRecordingAudio, setIsRecordingAudio] = useState(false);
+  const [recordSeconds, setRecordSeconds] = useState(0);
+  const [isProcessing, setIsProcessing] = useState(false);
+
   const [transcript, setTranscript] = useState([]);
   const [interimText, setInterimText] = useState('');
   const [analysis, setAnalysis] = useState(null);
   const [error, setError] = useState(null);
   const [inputText, setInputText] = useState('');
-  const [isProcessingAudio, setIsProcessingAudio] = useState(false);
 
   const transcriptEndRef = useRef(null);
-  const isListeningRef = useRef(false);
+  const keepListeningRef = useRef(false);
 
   // Auto-scroll transcript
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [transcript, interimText]);
 
-  // WebSocket setup
+  // WebSocket Connection
   useEffect(() => {
     const ws = new WebSocket(getHearingWsUrl());
     wsRef.current = ws;
@@ -43,15 +48,18 @@ function HearingAssistant() {
         const data = JSON.parse(event.data);
         if (data.status === 'reset') return;
 
-        setIsProcessingAudio(false);
+        // Clear processing spinner
+        setIsProcessing(false);
+        if (processingTimeoutRef.current) clearTimeout(processingTimeoutRef.current);
 
         // If backend returned a transcription from audio
         if (data.transcription && data.transcription.trim()) {
           setTranscript(prev => {
+            const trimmed = data.transcription.trim();
             const last = prev[prev.length - 1];
-            if (last && last.text === data.transcription.trim()) return prev;
+            if (last && last.text === trimmed) return prev;
             return [...prev.slice(-49), {
-              text: data.transcription.trim(),
+              text: trimmed,
               time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
             }];
           });
@@ -60,33 +68,38 @@ function HearingAssistant() {
         if (data.summary || data.tone) {
           setAnalysis(data);
 
-          // Urgent haptic alert
+          // Haptic alert on emergency
           if (data.is_urgent && typeof navigator !== 'undefined' && navigator.vibrate) {
             navigator.vibrate([250, 100, 250]);
           }
         }
       } catch (e) {
-        console.error("Hearing message parse error", e);
+        setIsProcessing(false);
+        console.error("Message error:", e);
       }
     };
 
     ws.onerror = () => {
-      setError('WebSocket connection error');
+      setIsProcessing(false);
+      setError('Connection error with AI backend');
     };
 
     ws.onclose = () => {
+      setIsProcessing(false);
       setIsConnected(false);
     };
 
     return () => {
+      keepListeningRef.current = false;
+      stopLiveListening();
+      stopVoiceRecording();
       ws.close();
-      stopListening();
     };
   }, []);
 
-  // Send text to backend
+  // Send plain transcript text to backend
   const sendText = useCallback((text) => {
-    if (!text.trim()) return;
+    if (!text || !text.trim()) return;
     const trimmed = text.trim();
 
     setTranscript(prev => [...prev.slice(-49), {
@@ -94,135 +107,193 @@ function HearingAssistant() {
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     }]);
 
+    setIsProcessing(true);
+    if (processingTimeoutRef.current) clearTimeout(processingTimeoutRef.current);
+    processingTimeoutRef.current = setTimeout(() => setIsProcessing(false), 12000);
+
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ action: 'transcript', text: trimmed }));
     }
     setInputText('');
   }, []);
 
-  // Send audio chunk to backend
-  const sendAudioChunk = useCallback((blob, mimeType) => {
-    if (wsRef.current?.readyState !== WebSocket.OPEN) return;
-    setIsProcessingAudio(true);
-
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const base64data = reader.result;
-      wsRef.current.send(JSON.stringify({
-        action: 'audio',
-        data: base64data,
-        mime_type: mimeType || 'audio/webm'
-      }));
-    };
-    reader.readAsDataURL(blob);
-  }, []);
-
-  // Start microphone listening via MediaRecorder (works on 100% of mobile browsers)
-  const startListening = async () => {
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 1. LIVE CAPTIONS (Web Speech API)
+  // ─────────────────────────────────────────────────────────────────────────────
+  const startLiveListening = () => {
     setError(null);
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setError('Live browser speech recognition not supported in this browser. Please use the "Record Voice Clip" button below or Chrome.');
+      return;
+    }
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      audioStreamRef.current = stream;
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+      recognitionRef.current = recognition;
+      keepListeningRef.current = true;
 
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-        ? 'audio/webm;codecs=opus'
-        : MediaRecorder.isTypeSupported('audio/mp4')
-          ? 'audio/mp4'
-          : '';
+      recognition.onstart = () => {
+        setIsLiveListening(true);
+      };
 
-      const options = mimeType ? { mimeType } : {};
-      const recorder = new MediaRecorder(stream, options);
-      mediaRecorderRef.current = recorder;
+      recognition.onresult = (e) => {
+        let interim = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          if (e.results[i].isFinal) {
+            const text = e.results[i][0].transcript.trim();
+            if (text) {
+              sendText(text);
+            }
+            setInterimText('');
+          } else {
+            interim += e.results[i][0].transcript;
+          }
+        }
+        setInterimText(interim);
+      };
 
-      recorder.ondataavailable = (event) => {
-        if (event.data && event.data.size > 2000) {
-          sendAudioChunk(event.data, recorder.mimeType);
+      recognition.onerror = (e) => {
+        console.warn('SpeechRecognition error:', e.error);
+        if (e.error === 'not-allowed') {
+          setError('Microphone permission denied. Please allow microphone access in your browser.');
+          setIsLiveListening(false);
+          keepListeningRef.current = false;
+        } else if (e.error === 'network') {
+          setError('Browser speech network error. Use the "Record Voice Clip" button below.');
+          setIsLiveListening(false);
+          keepListeningRef.current = false;
         }
       };
 
-      // Record in 4-second continuous segments
-      recorder.start(4000);
-      setIsListening(true);
-      isListeningRef.current = true;
-
-      // Optional: Also attach Web Speech API for immediate live text preview if available
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-      if (SpeechRecognition) {
-        try {
-          const recognition = new SpeechRecognition();
-          recognition.continuous = true;
-          recognition.interimResults = true;
-          recognition.lang = 'en-US';
-          recognitionRef.current = recognition;
-
-          recognition.onresult = (e) => {
-            let interim = '';
-            for (let i = e.resultIndex; i < e.results.length; i++) {
-              if (e.results[i].isFinal) {
-                const text = e.results[i][0].transcript.trim();
-                if (text) sendText(text);
-                setInterimText('');
-              } else {
-                interim += e.results[i][0].transcript;
-              }
-            }
-            setInterimText(interim);
-          };
-
-          recognition.onend = () => {
-            if (isListeningRef.current) {
-              try { recognition.start(); } catch (err) { /* ignore */ }
-            }
-          };
-
-          recognition.onerror = () => { /* fallback to MediaRecorder silently */ };
-          recognition.start();
-        } catch (e) {
-          console.log("Web Speech API fallback to MediaRecorder");
+      recognition.onend = () => {
+        if (keepListeningRef.current) {
+          try {
+            recognition.start();
+          } catch (err) {
+            setIsLiveListening(false);
+          }
+        } else {
+          setIsLiveListening(false);
+          setInterimText('');
         }
-      }
+      };
 
+      // MUST be called synchronously within user click!
+      recognition.start();
     } catch (err) {
-      console.error("Microphone error", err);
-      setError(`Microphone access denied: ${err.message || 'Please allow mic permissions in browser'}`);
-      setIsListening(false);
-      isListeningRef.current = false;
+      console.error('Speech recognition start failed:', err);
+      setError(`Failed to start live speech: ${err.message}. Try "Record Voice Clip" instead.`);
+      setIsLiveListening(false);
     }
   };
 
-  const stopListening = () => {
-    isListeningRef.current = false;
-    setIsListening(false);
+  const stopLiveListening = () => {
+    keepListeningRef.current = false;
+    setIsLiveListening(false);
     setInterimText('');
-
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      try { mediaRecorderRef.current.stop(); } catch (e) {}
-    }
-    if (audioStreamRef.current) {
-      audioStreamRef.current.getTracks().forEach(t => t.stop());
-      audioStreamRef.current = null;
-    }
     if (recognitionRef.current) {
-      try { recognitionRef.current.stop(); } catch (e) {}
+      try {
+        recognitionRef.current.stop();
+      } catch (e) {}
       recognitionRef.current = null;
     }
   };
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 2. VOICE CLIP RECORDING (MediaRecorder -> Gemini Audio AI)
+  // ─────────────────────────────────────────────────────────────────────────────
+  const startVoiceRecording = async () => {
+    setError(null);
+    audioChunksRef.current = [];
+    setRecordSeconds(0);
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm')
+        ? 'audio/webm'
+        : MediaRecorder.isTypeSupported('audio/mp4')
+          ? 'audio/mp4'
+          : '';
+
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        stream.getTracks().forEach(t => t.stop());
+        if (recordTimerRef.current) clearInterval(recordTimerRef.current);
+
+        const audioBlob = new Blob(audioChunksRef.current, { type: recorder.mimeType || 'audio/webm' });
+        if (audioBlob.size > 1000) {
+          setIsProcessing(true);
+          if (processingTimeoutRef.current) clearTimeout(processingTimeoutRef.current);
+          processingTimeoutRef.current = setTimeout(() => setIsProcessing(false), 15000);
+
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            if (wsRef.current?.readyState === WebSocket.OPEN) {
+              wsRef.current.send(JSON.stringify({
+                action: 'audio',
+                data: reader.result,
+                mime_type: recorder.mimeType || 'audio/webm'
+              }));
+            }
+          };
+          reader.readAsDataURL(audioBlob);
+        }
+      };
+
+      recorder.start();
+      setIsRecordingAudio(true);
+
+      recordTimerRef.current = setInterval(() => {
+        setRecordSeconds(s => s + 1);
+      }, 1000);
+
+    } catch (err) {
+      console.error('Mic record error:', err);
+      setError(`Microphone error: ${err.message || 'Permission denied'}`);
+      setIsRecordingAudio(false);
+    }
+  };
+
+  const stopVoiceRecording = () => {
+    setIsRecordingAudio(false);
+    if (recordTimerRef.current) clearInterval(recordTimerRef.current);
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      try {
+        mediaRecorderRef.current.stop();
+      } catch (e) {}
+    }
+  };
+
   const resetAll = () => {
-    stopListening();
+    stopLiveListening();
+    stopVoiceRecording();
     setTranscript([]);
     setAnalysis(null);
     setInterimText('');
     setError(null);
+    setIsProcessing(false);
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ action: 'reset' }));
     }
   };
 
-  // Tone styling
   const toneColor = {
     urgent:    'text-red-300 bg-red-500/15 border-red-500/40',
     alarmed:   'text-red-300 bg-red-500/15 border-red-500/40',
+    emergency: 'text-red-300 bg-red-500/15 border-red-500/40',
     angry:     'text-orange-300 bg-orange-500/15 border-orange-500/40',
     worried:   'text-yellow-300 bg-yellow-500/15 border-yellow-500/40',
     confused:  'text-yellow-200 bg-yellow-400/15 border-yellow-400/40',
@@ -244,7 +315,7 @@ function HearingAssistant() {
           <span className="text-lg">🎙️</span>
           <div>
             <h2 className="font-semibold text-gray-100 text-xs md:text-sm">Hearing & Speech Assistant</h2>
-            <p className="text-[0.65rem] text-white/40">Real-time Speech-to-Text & AI Tone Analysis</p>
+            <p className="text-[0.65rem] text-white/40">Real-time Speech Recognition & Tone Analysis</p>
           </div>
         </div>
 
@@ -273,7 +344,7 @@ function HearingAssistant() {
           <span className="text-xl">🚨</span>
           <div>
             <div>URGENT SITUATION DETECTED</div>
-            <div className="text-[0.65rem] font-normal text-red-300">Speaker is issuing an alert or distress call</div>
+            <div className="text-[0.65rem] font-normal text-red-300">Speaker is sounding an alarm, danger, or emergency!</div>
           </div>
         </div>
       )}
@@ -315,40 +386,51 @@ function HearingAssistant() {
         ) : (
           <div className="p-3 rounded-xl border border-white/5 bg-white/[0.02] text-center">
             <p className="text-xs text-white/40">
-              {isListening ? (
-                <span className="flex items-center justify-center gap-2">
+              {isLiveListening ? (
+                <span className="flex items-center justify-center gap-2 text-emerald-400">
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
-                  Listening to conversation... AI summary will generate automatically
+                  Listening continuously... Speak near the microphone
+                </span>
+              ) : isRecordingAudio ? (
+                <span className="flex items-center justify-center gap-2 text-red-400">
+                  <span className="w-2 h-2 rounded-full bg-red-400 animate-ping"></span>
+                  Recording audio clip ({recordSeconds}s)... Tap "Stop & Analyze" when done
                 </span>
               ) : (
-                'Tap "Start Listening" or use presets below to analyze speech'
+                'Choose a voice option below or tap a quick scenario to analyze speech'
               )}
             </p>
           </div>
         )}
       </div>
 
-      {/* ── Conversation Presets (Quick Test) ── */}
+      {/* ── Quick Test Presets (One Tap) ── */}
       <div className="mx-3 mt-2 flex-shrink-0">
-        <p className="text-[0.65rem] text-white/30 uppercase tracking-wider mb-1 px-1">Quick Test Scenarios:</p>
+        <p className="text-[0.65rem] text-white/30 uppercase tracking-wider mb-1 px-1">Quick Scenarios (One-Tap Test):</p>
         <div className="flex flex-wrap gap-1.5">
           <button
             onClick={() => sendText("Watch out! There is a fast moving car coming right towards you!")}
-            className="text-[0.65rem] px-2 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-300 border border-red-500/20 transition-colors"
+            className="text-[0.65rem] px-2.5 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-300 border border-red-500/20 transition-colors flex items-center gap-1"
           >
-            🚨 Emergency Warning
+            <span>🚨</span> Emergency Alert
           </button>
           <button
             onClick={() => sendText("Excuse me, could you please tell me where the nearest metro station is?")}
-            className="text-[0.65rem] px-2 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/20 transition-colors"
+            className="text-[0.65rem] px-2.5 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/20 transition-colors flex items-center gap-1"
           >
-            😊 Asking Directions
+            <span>😊</span> Asking Help
           </button>
           <button
-            onClick={() => sendText("I've been waiting here for two hours, this service is completely unacceptable!")}
-            className="text-[0.65rem] px-2 py-1 rounded-lg bg-orange-500/10 hover:bg-orange-500/20 text-orange-300 border border-orange-500/20 transition-colors"
+            onClick={() => sendText("I have been waiting here for an hour, this service is completely unacceptable!")}
+            className="text-[0.65rem] px-2.5 py-1.5 rounded-lg bg-orange-500/10 hover:bg-orange-500/20 text-orange-300 border border-orange-500/20 transition-colors flex items-center gap-1"
           >
-            😠 Angry Complaint
+            <span>😠</span> Angry Complaint
+          </button>
+          <button
+            onClick={() => sendText("The meeting is scheduled for tomorrow morning at 10 AM in conference room B.")}
+            className="text-[0.65rem] px-2.5 py-1.5 rounded-lg bg-sky-500/10 hover:bg-sky-500/20 text-sky-300 border border-sky-500/20 transition-colors flex items-center gap-1"
+          >
+            <span>💼</span> Normal Info
           </button>
         </div>
       </div>
@@ -356,15 +438,15 @@ function HearingAssistant() {
       {/* ── Live Transcript Stream ── */}
       <div className="flex-1 overflow-y-auto px-3.5 py-3 space-y-2 min-h-0">
         {transcript.length === 0 && !interimText && (
-          <div className="flex flex-col items-center justify-center h-full text-white/20 text-xs text-center">
+          <div className="flex flex-col items-center justify-center h-full text-white/20 text-xs text-center py-6">
             <span className="text-3xl mb-2">💬</span>
-            <p>Spoken dialogue will appear here in real-time</p>
+            <p>Spoken words and transcripts will appear here in real time</p>
           </div>
         )}
 
         {transcript.map((line, i) => (
-          <div key={i} className="flex gap-2.5 items-start p-2 rounded-lg bg-white/[0.02] border border-white/5">
-            <span className="text-[0.6rem] text-purple-400/80 font-mono mt-0.5 flex-shrink-0 font-semibold">
+          <div key={i} className="flex gap-2.5 items-start p-2.5 rounded-xl bg-white/[0.03] border border-white/5">
+            <span className="text-[0.6rem] text-purple-400 font-mono mt-0.5 flex-shrink-0 font-semibold">
               {line.time}
             </span>
             <p className="text-xs text-gray-200 leading-relaxed font-sans">{line.text}</p>
@@ -372,17 +454,17 @@ function HearingAssistant() {
         ))}
 
         {interimText && (
-          <div className="p-2 rounded-lg bg-purple-500/10 border border-purple-500/20">
+          <div className="p-2.5 rounded-xl bg-purple-500/10 border border-purple-500/25">
             <p className="text-xs text-purple-200 italic leading-relaxed animate-pulse">
               🎙️ {interimText}…
             </p>
           </div>
         )}
 
-        {isProcessingAudio && (
-          <div className="flex items-center gap-2 text-[0.65rem] text-purple-300/60 italic px-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-ping"></span>
-            Transcribing audio segment...
+        {isProcessing && (
+          <div className="flex items-center gap-2 text-xs text-purple-300 bg-purple-500/10 border border-purple-500/20 p-2 rounded-xl">
+            <span className="w-2 h-2 rounded-full bg-purple-400 animate-ping"></span>
+            <span>Gemini AI is analyzing conversation & tone...</span>
           </div>
         )}
 
@@ -396,28 +478,51 @@ function HearingAssistant() {
         </div>
       )}
 
-      {/* ── Controls & Text Input Bar ── */}
-      <div className="p-3 border-t border-white/[0.07] bg-[#0c0c1e]/60 flex-shrink-0 space-y-2">
-        {/* Mic Toggle Button */}
-        {isListening ? (
-          <button
-            onClick={stopListening}
-            className="w-full py-2.5 rounded-xl bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-300 font-semibold text-xs transition-all flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(239,68,68,0.2)]"
-          >
-            <span className="w-2.5 h-2.5 rounded-full bg-red-400 animate-ping" />
-            Stop Microphone Listening
-          </button>
-        ) : (
-          <button
-            onClick={startListening}
-            disabled={!isConnected}
-            className="w-full py-2.5 rounded-xl bg-gradient-to-r from-purple-600/30 to-indigo-600/30 hover:from-purple-600/40 hover:to-indigo-600/40 border border-purple-500/40 text-purple-200 font-semibold text-xs transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(168,85,247,0.15)]"
-          >
-            🎙️ Start Microphone Listening
-          </button>
-        )}
+      {/* ── Voice & Text Controls ── */}
+      <div className="p-3 border-t border-white/[0.07] bg-[#0c0c1e]/70 flex-shrink-0 space-y-2.5">
 
-        {/* Text Input for Manual Input or Simulation */}
+        {/* Dual Mode Buttons: Live Captions OR Record Voice Note */}
+        <div className="grid grid-cols-2 gap-2">
+          {/* Mode 1: Live Captions */}
+          {isLiveListening ? (
+            <button
+              onClick={stopLiveListening}
+              className="py-2.5 px-3 rounded-xl bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-300 font-semibold text-xs transition-all flex items-center justify-center gap-1.5"
+            >
+              <span className="w-2 h-2 rounded-full bg-red-400 animate-ping" />
+              Stop Captions
+            </button>
+          ) : (
+            <button
+              onClick={startLiveListening}
+              disabled={isRecordingAudio || !isConnected}
+              className="py-2.5 px-3 rounded-xl bg-purple-600/25 hover:bg-purple-600/35 border border-purple-500/40 text-purple-200 font-semibold text-xs transition-all disabled:opacity-40 flex items-center justify-center gap-1.5"
+            >
+              <span>🎙️</span> Live Captions
+            </button>
+          )}
+
+          {/* Mode 2: Push-to-Talk Record Audio Clip */}
+          {isRecordingAudio ? (
+            <button
+              onClick={stopVoiceRecording}
+              className="py-2.5 px-3 rounded-xl bg-red-600/30 hover:bg-red-600/40 border border-red-500/50 text-red-200 font-semibold text-xs transition-all flex items-center justify-center gap-1.5 animate-pulse"
+            >
+              <span className="w-2 h-2 rounded-full bg-red-400 animate-ping" />
+              Stop & Send ({recordSeconds}s)
+            </button>
+          ) : (
+            <button
+              onClick={startVoiceRecording}
+              disabled={isLiveListening || !isConnected}
+              className="py-2.5 px-3 rounded-xl bg-indigo-600/25 hover:bg-indigo-600/35 border border-indigo-500/40 text-indigo-200 font-semibold text-xs transition-all disabled:opacity-40 flex items-center justify-center gap-1.5"
+            >
+              <span>🔊</span> Record Audio Clip
+            </button>
+          )}
+        </div>
+
+        {/* Text Input Bar */}
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -429,13 +534,13 @@ function HearingAssistant() {
             type="text"
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
-            placeholder="Type a spoken phrase or test sentence..."
+            placeholder="Or type a spoken phrase to analyze..."
             className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-gray-200 placeholder-white/30 focus:outline-none focus:border-purple-500/50"
           />
           <button
             type="submit"
             disabled={!inputText.trim()}
-            className="px-3.5 py-2 bg-purple-500/20 hover:bg-purple-500/30 disabled:opacity-30 border border-purple-500/30 text-purple-300 rounded-xl text-xs font-semibold transition-colors"
+            className="px-3.5 py-2 bg-purple-500/25 hover:bg-purple-500/35 disabled:opacity-30 border border-purple-500/30 text-purple-300 rounded-xl text-xs font-semibold transition-colors"
           >
             Send
           </button>
