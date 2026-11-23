@@ -14,6 +14,7 @@ import cv2
 from dotenv import load_dotenv
 from vision import process_frame
 from scene_ai import describe_scene, get_last_description
+from hearing_ai import analyze_conversation, reset_conversation, add_transcript_line
 
 # Load .env file for GEMINI_API_KEY
 load_dotenv()
@@ -175,6 +176,54 @@ async def vision_endpoint(websocket: WebSocket):
         print("❌ Vision WebSocket disconnected")
     except Exception as e:
         print(f"❌ Vision WebSocket error: {e}")
+
+
+@app.websocket("/ws/hearing")
+async def hearing_endpoint(websocket: WebSocket):
+    """
+    WebSocket endpoint for hearing impaired module.
+    - Receives transcript lines from browser Web Speech API
+    - Sends to Gemini for summarization + tone analysis
+    - Returns: summary, tone, key_points, is_urgent
+    """
+    await websocket.accept()
+    print("✅ Hearing WebSocket connected")
+
+    hearing_task = None
+
+    async def run_hearing_analysis(text: str):
+        try:
+            result = await asyncio.to_thread(analyze_conversation, text)
+            await websocket.send_text(json.dumps(result))
+        except Exception as e:
+            print(f"❌ Hearing analysis error: {e}")
+
+    try:
+        while True:
+            data = await websocket.receive_text()
+            msg = json.loads(data)
+
+            action = msg.get("action", "transcript")
+
+            if action == "reset":
+                reset_conversation()
+                await websocket.send_text(json.dumps({"status": "reset"}))
+                continue
+
+            if action == "transcript":
+                text = msg.get("text", "").strip()
+                if text:
+                    add_transcript_line(text)
+                    # Only run Gemini analysis if no task is currently running
+                    if hearing_task is None or hearing_task.done():
+                        hearing_task = asyncio.create_task(
+                            run_hearing_analysis(text)
+                        )
+
+    except WebSocketDisconnect:
+        print("❌ Hearing WebSocket disconnected")
+    except Exception as e:
+        print(f"❌ Hearing WebSocket error: {e}")
 
 
 if __name__ == "__main__":

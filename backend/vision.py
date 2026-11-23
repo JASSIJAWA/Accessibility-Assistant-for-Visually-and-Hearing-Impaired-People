@@ -128,10 +128,11 @@ def get_urgency(distance_steps: int) -> str:
 
 def detect_objects(frame: np.ndarray, conf_threshold: float = 0.45) -> list:
     """
-    Run YOLOv8 object detection with calibrated spatial awareness.
+    Run YOLO11 object detection with tracking + calibrated spatial awareness.
+    Tracking assigns consistent IDs to objects across frames for smoother narration.
     """
     h, w = frame.shape[:2]
-    results = yolo_model(frame, verbose=False, conf=conf_threshold)
+    results = yolo_model.track(frame, verbose=False, conf=conf_threshold, persist=True, tracker="bytetrack.yaml")
     detections = []
 
     for result in results:
@@ -140,6 +141,7 @@ def detect_objects(frame: np.ndarray, conf_threshold: float = 0.45) -> list:
             confidence = float(box.conf[0])
             class_id = int(box.cls[0])
             label = yolo_model.names[class_id]
+            track_id = int(box.id[0]) if box.id is not None else -1
 
             box_center_x = (x1 + x2) / 2
             box_height = y2 - y1
@@ -151,6 +153,7 @@ def detect_objects(frame: np.ndarray, conf_threshold: float = 0.45) -> list:
             detections.append({
                 "label": label,
                 "confidence": round(confidence, 2),
+                "track_id": track_id,
                 "box": {
                     "x1": round(x1), "y1": round(y1),
                     "x2": round(x2), "y2": round(y2),
