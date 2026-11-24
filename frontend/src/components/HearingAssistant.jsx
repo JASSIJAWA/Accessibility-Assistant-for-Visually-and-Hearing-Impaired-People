@@ -1,9 +1,7 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
+import { getHearingWsUrl } from '../config';
 
-const getHearingWsUrl = () => {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${protocol}//${window.location.host}/ws/hearing`;
-};
+const MAX_RECORD_SECONDS = 85; // Keeps WAV base64 well below backend 6MB WebSocket limit
 
 // ─── Downsample raw Float32 PCM to 16kHz mono ────────────────────────────────
 function downsampleTo16k(inputSamples, inputSampleRate) {
@@ -36,9 +34,9 @@ function encodeWAV(samples, sampleRate = 16000) {
   const buffer = new ArrayBuffer(44 + samples.length * 2);
   const view = new DataView(buffer);
 
-  function writeString(view, offset, string) {
+  function writeString(viewObj, offset, string) {
     for (let i = 0; i < string.length; i++) {
-      view.setUint8(offset + i, string.charCodeAt(i));
+      viewObj.setUint8(offset + i, string.charCodeAt(i));
     }
   }
 
@@ -46,26 +44,40 @@ function encodeWAV(samples, sampleRate = 16000) {
   view.setUint32(4, 36 + samples.length * 2, true);
   writeString(view, 8, 'WAVE');
   writeString(view, 12, 'fmt ');
-  view.setUint32(16, 16, true); // SubChunk1Size (16 for PCM)
-  view.setUint16(20, 1, true);  // AudioFormat (1 = PCM)
-  view.setUint16(22, 1, true);  // NumChannels (1 = Mono)
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
   view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * 2, true); // ByteRate
-  view.setUint16(32, 2, true);  // BlockAlign
-  view.setUint16(34, 16, true); // BitsPerSample
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
   writeString(view, 36, 'data');
   view.setUint32(40, samples.length * 2, true);
 
   let offset = 44;
   for (let i = 0; i < samples.length; i++, offset += 2) {
     const s = Math.max(-1, Math.min(1, samples[i]));
-    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
   }
 
   return new Blob([buffer], { type: 'audio/wav' });
 }
 
-function HearingAssistant() {
+const TONE_COLORS = {
+  urgent: 'text-red-300 bg-red-500/15 border-red-500/40',
+  alarmed: 'text-red-300 bg-red-500/15 border-red-500/40',
+  emergency: 'text-red-300 bg-red-500/15 border-red-500/40',
+  angry: 'text-orange-300 bg-orange-500/15 border-orange-500/40',
+  worried: 'text-yellow-300 bg-yellow-500/15 border-yellow-500/40',
+  confused: 'text-yellow-200 bg-yellow-400/15 border-yellow-400/40',
+  sad: 'text-blue-300 bg-blue-500/15 border-blue-500/40',
+  happy: 'text-emerald-300 bg-emerald-500/15 border-emerald-500/40',
+  excited: 'text-green-300 bg-green-500/15 border-green-500/40',
+  calm: 'text-sky-300 bg-sky-500/15 border-sky-500/40',
+  neutral: 'text-gray-300 bg-gray-500/15 border-gray-500/40',
+};
+
+function HearingAssistant({ onConnectionChange }) {
   const wsRef = useRef(null);
   const audioContextRef = useRef(null);
   const mediaStreamRef = useRef(null);
@@ -77,12 +89,20 @@ function HearingAssistant() {
   const recordTimerRef = useRef(null);
   const processingTimeoutRef = useRef(null);
   const transcriptEndRef = useRef(null);
+  const isRecordingRef = useRef(false);
+  const isStartingRef = useRef(false);
+  const mountedRef = useRef(true);
+  const onConnectionChangeRef = useRef(onConnectionChange);
+
+  useEffect(() => {
+    onConnectionChangeRef.current = onConnectionChange;
+  }, [onConnectionChange]);
 
   const [isConnected, setIsConnected] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [audioLevel, setAudioLevel] = useState(0); // 0 to 100 for visualizer
+  const [audioLevel, setAudioLevel] = useState(0);
 
   const [transcript, setTranscript] = useState([]);
   const [analysis, setAnalysis] = useState(null);
@@ -94,86 +114,8 @@ function HearingAssistant() {
     transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [transcript]);
 
-  // WebSocket Connection
-  useEffect(() => {
-    let reconnectTimeout = null;
-    let cancelled = false;
-
-    const connect = () => {
-      const ws = new WebSocket(getHearingWsUrl());
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        setIsConnected(true);
-        setError(null);
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.status === 'reset') return;
-
-          setIsProcessing(false);
-          if (processingTimeoutRef.current) clearTimeout(processingTimeoutRef.current);
-
-          // Transcription from Gemini or Fallback Whisper
-          if (data.transcription && data.transcription.trim()) {
-            const text = data.transcription.trim();
-            setTranscript(prev => {
-              const last = prev[prev.length - 1];
-              if (last && last.text === text) return prev;
-              return [...prev.slice(-49), {
-                text,
-                tone: data.tone || 'neutral',
-                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-              }];
-            });
-          }
-
-          // Summary and Tone
-          if (data.summary || data.tone) {
-            setAnalysis(data);
-
-            // Emergency vibration
-            if (data.is_urgent && typeof navigator !== 'undefined' && navigator.vibrate) {
-              try {
-                navigator.vibrate([300, 150, 300, 150, 400]);
-              } catch (e) {}
-            }
-          }
-        } catch (e) {
-          setIsProcessing(false);
-          console.error("Message parse error:", e);
-        }
-      };
-
-      ws.onerror = () => {
-        setIsProcessing(false);
-        setError('Backend WebSocket disconnected. Retrying...');
-      };
-
-      ws.onclose = () => {
-        setIsProcessing(false);
-        setIsConnected(false);
-        // Only reconnect if not cancelled (component still mounted)
-        if (!cancelled) {
-          reconnectTimeout = setTimeout(connect, 3000);
-        }
-      };
-    };
-
-    connect();
-
-    return () => {
-      cancelled = true;  // Prevent zombie reconnects after unmount
-      stopRecording();
-      if (reconnectTimeout) clearTimeout(reconnectTimeout);
-      if (wsRef.current) wsRef.current.close();
-    };
-  }, []);
-
   // Send WAV Audio Blob to Backend Gemini Multimodal AI
-  const sendAudioBlob = (wavBlob) => {
+  const sendAudioBlob = useCallback((wavBlob) => {
     if (wsRef.current?.readyState !== WebSocket.OPEN) {
       setError('Cannot send audio: Server disconnected.');
       return;
@@ -181,49 +123,263 @@ function HearingAssistant() {
 
     setIsProcessing(true);
     if (processingTimeoutRef.current) clearTimeout(processingTimeoutRef.current);
-    processingTimeoutRef.current = setTimeout(() => setIsProcessing(false), 15000);
+    processingTimeoutRef.current = setTimeout(() => {
+      if (mountedRef.current) setIsProcessing(false);
+    }, 15000);
 
     const reader = new FileReader();
     reader.onloadend = () => {
-      wsRef.current.send(JSON.stringify({
-        action: 'audio',
-        data: reader.result,
-        mime_type: 'audio/wav'
-      }));
+      if (!mountedRef.current) return;
+      if (wsRef.current?.readyState !== WebSocket.OPEN) {
+        setIsProcessing(false);
+        setError('Connection lost while sending audio.');
+        return;
+      }
+      wsRef.current.send(
+        JSON.stringify({
+          action: 'audio',
+          data: reader.result,
+          mime_type: 'audio/wav',
+        }),
+      );
+    };
+    reader.onerror = () => {
+      if (!mountedRef.current) return;
+      setIsProcessing(false);
+      setError('Failed to encode recorded audio.');
     };
     reader.readAsDataURL(wavBlob);
-  };
+  }, []);
 
-  // Send plain text (e.g. for simulations or typed dialogue)
+  const stopRecording = useCallback(() => {
+    if (!isRecordingRef.current && !mediaStreamRef.current) return;
+    isRecordingRef.current = false;
+    isStartingRef.current = false;
+    setIsRecording(false);
+
+    if (recordTimerRef.current) {
+      clearInterval(recordTimerRef.current);
+      recordTimerRef.current = null;
+    }
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
+    setAudioLevel(0);
+
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((t) => t.stop());
+      mediaStreamRef.current = null;
+    }
+
+    if (processorRef.current) {
+      try {
+        processorRef.current.disconnect();
+      } catch {
+        // Ignore already-disconnected node
+      }
+      processorRef.current = null;
+    }
+
+    if (analyserRef.current) {
+      analyserRef.current = null;
+    }
+
+    if (audioContextRef.current) {
+      try {
+        audioContextRef.current.close();
+      } catch {
+        // Ignore close errors
+      }
+      audioContextRef.current = null;
+    }
+
+    const chunks = pcmChunksRef.current;
+    pcmChunksRef.current = [];
+    const currentRate = sampleRateRef.current || 16000;
+
+    if (chunks.length > 0 && mountedRef.current) {
+      let totalLength = 0;
+      for (let i = 0; i < chunks.length; i++) {
+        totalLength += chunks[i].length;
+      }
+
+      if (totalLength > currentRate * 0.4) {
+        const merged = new Float32Array(totalLength);
+        let offset = 0;
+        for (let i = 0; i < chunks.length; i++) {
+          merged.set(chunks[i], offset);
+          offset += chunks[i].length;
+        }
+
+        const pcm16k = downsampleTo16k(merged, currentRate);
+        const wavBlob = encodeWAV(pcm16k, 16000);
+        if (wavBlob.size > 1000) {
+          sendAudioBlob(wavBlob);
+        }
+      }
+    }
+  }, [sendAudioBlob]);
+
+  const stopRecordingRef = useRef(stopRecording);
+  useEffect(() => {
+    stopRecordingRef.current = stopRecording;
+  }, [stopRecording]);
+
+  // WebSocket Connection
+  useEffect(() => {
+    mountedRef.current = true;
+    let reconnectTimeout = null;
+    let cancelled = false;
+
+    const connect = () => {
+      if (cancelled) return;
+      const ws = new WebSocket(getHearingWsUrl());
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        if (cancelled) {
+          ws.close();
+          return;
+        }
+        setIsConnected(true);
+        onConnectionChangeRef.current?.(true);
+        setError(null);
+      };
+
+      ws.onmessage = (event) => {
+        if (cancelled) return;
+        try {
+          const data = JSON.parse(event.data);
+          if (data.status === 'reset') return;
+
+          setIsProcessing(false);
+          if (processingTimeoutRef.current) clearTimeout(processingTimeoutRef.current);
+
+          if (data.error && !data.transcription) {
+            setError(data.error);
+          }
+
+          if (data.transcription && data.transcription.trim()) {
+            const text = data.transcription.trim();
+            setTranscript((prev) => {
+              const last = prev[prev.length - 1];
+              if (last && last.text === text) return prev;
+              return [
+                ...prev.slice(-49),
+                {
+                  text,
+                  tone: data.tone || 'neutral',
+                  time: new Date().toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                  }),
+                },
+              ];
+            });
+          }
+
+          if (data.summary || data.tone) {
+            setAnalysis(data);
+
+            if (data.is_urgent && typeof navigator !== 'undefined' && navigator.vibrate) {
+              try {
+                navigator.vibrate([300, 150, 300, 150, 400]);
+              } catch {
+                // Ignore vibration restrictions
+              }
+            }
+          }
+        } catch (e) {
+          setIsProcessing(false);
+          console.error('Message parse error:', e);
+        }
+      };
+
+      ws.onerror = () => {
+        if (cancelled) return;
+        setIsProcessing(false);
+        setError('Backend WebSocket disconnected. Retrying...');
+      };
+
+      ws.onclose = () => {
+        if (cancelled) return;
+        setIsProcessing(false);
+        setIsConnected(false);
+        onConnectionChangeRef.current?.(false);
+        reconnectTimeout = setTimeout(connect, 3000);
+      };
+    };
+
+    connect();
+
+    return () => {
+      cancelled = true;
+      mountedRef.current = false;
+      onConnectionChangeRef.current?.(false);
+      stopRecordingRef.current();
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      if (processingTimeoutRef.current) clearTimeout(processingTimeoutRef.current);
+      if (wsRef.current) wsRef.current.close();
+    };
+  }, []);
+
+  // Send plain text (for typed dialogue)
   const sendText = useCallback((text) => {
     if (!text || !text.trim()) return;
-    const trimmed = text.trim();
+    if (wsRef.current?.readyState !== WebSocket.OPEN) {
+      setError('Cannot send text: Server disconnected.');
+      return;
+    }
 
-    setTranscript(prev => [...prev.slice(-49), {
-      text: trimmed,
-      tone: 'user',
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-    }]);
+    const trimmed = text.trim();
+    setTranscript((prev) => [
+      ...prev.slice(-49),
+      {
+        text: trimmed,
+        tone: 'user',
+        time: new Date().toLocaleTimeString([], {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        }),
+      },
+    ]);
 
     setIsProcessing(true);
     if (processingTimeoutRef.current) clearTimeout(processingTimeoutRef.current);
-    processingTimeoutRef.current = setTimeout(() => setIsProcessing(false), 10000);
+    processingTimeoutRef.current = setTimeout(() => {
+      if (mountedRef.current) setIsProcessing(false);
+    }, 10000);
 
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ action: 'transcript', text: trimmed }));
-    }
+    wsRef.current.send(JSON.stringify({ action: 'transcript', text: trimmed }));
   }, []);
 
-  // ─────────────────────────────────────────────────────────────────────────────
   // High-Fidelity 16kHz WAV Audio Recording with Web Audio API
-  // ─────────────────────────────────────────────────────────────────────────────
+  // Note: AudioContext is created & resumed BEFORE await getUserMedia so iOS Safari preserves gesture activation.
   const startRecording = async () => {
+    if (isRecordingRef.current || isStartingRef.current) return;
+    isStartingRef.current = true;
     setError(null);
     pcmChunksRef.current = [];
     setRecordSeconds(0);
     setAudioLevel(0);
 
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    let audioCtx;
     try {
+      try {
+        audioCtx = new AudioCtx({ sampleRate: 16000 });
+      } catch {
+        audioCtx = new AudioCtx();
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume().catch(() => {});
+      }
+      audioContextRef.current = audioCtx;
+      sampleRateRef.current = audioCtx.sampleRate || 16000;
+
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
@@ -231,31 +387,29 @@ function HearingAssistant() {
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
-        }
+        },
       });
+
+      if (!mountedRef.current || !isStartingRef.current) {
+        stream.getTracks().forEach((t) => t.stop());
+        audioCtx.close().catch(() => {});
+        return;
+      }
+
+      if (audioCtx.state === 'suspended') {
+        await audioCtx.resume().catch(() => {});
+      }
+
       mediaStreamRef.current = stream;
 
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      let audioCtx;
-      try {
-        audioCtx = new AudioCtx({ sampleRate: 16000 });
-      } catch (e) {
-        // Fallback for mobile browsers enforcing hardware rates (44100/48000 Hz)
-        audioCtx = new AudioCtx();
-      }
-      audioContextRef.current = audioCtx;
-      sampleRateRef.current = audioCtx.sampleRate || 16000;
-
       const source = audioCtx.createMediaStreamSource(stream);
-
-      // Analyser for visual volume meter
       const analyser = audioCtx.createAnalyser();
       analyser.fftSize = 256;
       analyserRef.current = analyser;
       source.connect(analyser);
 
       const updateLevel = () => {
-        if (!analyserRef.current) return;
+        if (!analyserRef.current || !isRecordingRef.current) return;
         const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
         analyserRef.current.getByteFrequencyData(dataArray);
         let sum = 0;
@@ -266,13 +420,12 @@ function HearingAssistant() {
         setAudioLevel(Math.min(100, Math.round((avg / 128) * 100)));
         animFrameRef.current = requestAnimationFrame(updateLevel);
       };
-      updateLevel();
 
-      // ScriptProcessorNode captures raw PCM Float32
       const processor = audioCtx.createScriptProcessor(4096, 1, 1);
       processorRef.current = processor;
 
       processor.onaudioprocess = (e) => {
+        if (!isRecordingRef.current) return;
         const inputData = e.inputBuffer.getChannelData(0);
         pcmChunksRef.current.push(new Float32Array(inputData));
       };
@@ -280,88 +433,51 @@ function HearingAssistant() {
       source.connect(processor);
       processor.connect(audioCtx.destination);
 
+      isRecordingRef.current = true;
+      isStartingRef.current = false;
       setIsRecording(true);
-      recordTimerRef.current = setInterval(() => {
-        setRecordSeconds(s => s + 1);
-      }, 1000);
+      updateLevel();
 
+      recordTimerRef.current = setInterval(() => {
+        setRecordSeconds((s) => {
+          const next = s + 1;
+          if (next >= MAX_RECORD_SECONDS) {
+            stopRecordingRef.current();
+          }
+          return next;
+        });
+      }, 1000);
     } catch (err) {
       console.error('Microphone error:', err);
+      isStartingRef.current = false;
+      isRecordingRef.current = false;
+      if (audioContextRef.current) {
+        audioContextRef.current.close().catch(() => {});
+        audioContextRef.current = null;
+      }
       setError(`Microphone error: ${err.message || 'Permission denied. Please grant microphone access.'}`);
       setIsRecording(false);
     }
   };
 
-  const stopRecording = () => {
-    if (!isRecording && !mediaStreamRef.current) return;
-    setIsRecording(false);
-
-    if (recordTimerRef.current) clearInterval(recordTimerRef.current);
-    if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
-    setAudioLevel(0);
-
-    // Stop audio tracks
-    if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach(t => t.stop());
-      mediaStreamRef.current = null;
-    }
-
-    // Disconnect Web Audio processor
-    if (processorRef.current) {
-      try {
-        processorRef.current.disconnect();
-      } catch (e) {}
-      processorRef.current = null;
-    }
-
-    if (audioContextRef.current) {
-      try {
-        audioContextRef.current.close();
-      } catch (e) {}
-      audioContextRef.current = null;
-    }
-
-    // Merge PCM chunks and encode to 16kHz WAV
-    const chunks = pcmChunksRef.current;
-    const currentRate = sampleRateRef.current || 16000;
-    if (chunks.length > 0) {
-      let totalLength = 0;
-      for (let i = 0; i < chunks.length; i++) {
-        totalLength += chunks[i].length;
-      }
-
-      // Minimum ~0.4s of audio (e.g. 6400 samples at 16kHz, 17640 at 44.1kHz)
-      if (totalLength > currentRate * 0.4) {
-        const merged = new Float32Array(totalLength);
-        let offset = 0;
-        for (let i = 0; i < chunks.length; i++) {
-          merged.set(chunks[i], offset);
-          offset += chunks[i].length;
-        }
-
-        // Downsample Float32 to clean 16000Hz mono PCM
-        const pcm16k = downsampleTo16k(merged, currentRate);
-        const wavBlob = encodeWAV(pcm16k, 16000);
-        if (wavBlob.size > 1000) {
-          sendAudioBlob(wavBlob);
-        }
-      }
-    }
-    pcmChunksRef.current = [];
-  };
-
-  // Two-way communication: Deaf user types reply, phone speaks it aloud
+  // Two-way communication: Deaf user types reply, phone speaks it aloud (Chrome Android 25ms cancel delay)
   const speakReply = (textToSpeak) => {
     const text = textToSpeak || replyText;
     if (!text || !text.trim()) return;
 
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 0.95;
-      window.speechSynthesis.speak(utterance);
+      setTimeout(() => {
+        if (!mountedRef.current) return;
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.rate = 0.95;
+        if (window.speechSynthesis.paused) {
+          window.speechSynthesis.resume();
+        }
+        window.speechSynthesis.speak(utterance);
+      }, 25);
     }
-    setReplyText('');
+    if (!textToSpeak) setReplyText('');
   };
 
   const resetAll = () => {
@@ -375,25 +491,10 @@ function HearingAssistant() {
     }
   };
 
-  const toneColor = {
-    urgent:    'text-red-300 bg-red-500/15 border-red-500/40',
-    alarmed:   'text-red-300 bg-red-500/15 border-red-500/40',
-    emergency: 'text-red-300 bg-red-500/15 border-red-500/40',
-    angry:     'text-orange-300 bg-orange-500/15 border-orange-500/40',
-    worried:   'text-yellow-300 bg-yellow-500/15 border-yellow-500/40',
-    confused:  'text-yellow-200 bg-yellow-400/15 border-yellow-400/40',
-    sad:       'text-blue-300 bg-blue-500/15 border-blue-500/40',
-    happy:     'text-emerald-300 bg-emerald-500/15 border-emerald-500/40',
-    excited:   'text-green-300 bg-green-500/15 border-green-500/40',
-    calm:      'text-sky-300 bg-sky-500/15 border-sky-500/40',
-    neutral:   'text-gray-300 bg-gray-500/15 border-gray-500/40',
-  };
-
-  const currentToneClass = analysis ? (toneColor[analysis.tone] || toneColor.neutral) : toneColor.neutral;
+  const currentToneClass = analysis ? (TONE_COLORS[analysis.tone] || TONE_COLORS.neutral) : TONE_COLORS.neutral;
 
   return (
     <div className="flex flex-col h-full text-sm bg-transparent">
-
       {/* ── Top Header ── */}
       <div className="flex items-center justify-between px-4 py-3.5 border-b border-zinc-800/80 flex-shrink-0 bg-zinc-900/40">
         <div className="flex items-center gap-2.5">
@@ -407,7 +508,9 @@ function HearingAssistant() {
                 Gemini Audio AI
               </span>
             </h2>
-            <p className="text-[0.65rem] text-zinc-400 font-medium">100% accurate verbatim captions, tone detection & two-way speech</p>
+            <p className="text-[0.65rem] text-zinc-400 font-medium">
+              Verbatim captions, acoustic event detection & two-way speech
+            </p>
           </div>
         </div>
 
@@ -436,12 +539,14 @@ function HearingAssistant() {
           <span className="text-2xl flex-shrink-0">🚨</span>
           <div>
             <div className="tracking-wide uppercase font-black text-red-300">URGENT SITUATION OR SAFETY HAZARD DETECTED</div>
-            <div className="text-[0.68rem] font-normal text-red-200/90 mt-0.5">Speaker is warning of immediate danger, sounding an alert, or crying for help!</div>
+            <div className="text-[0.68rem] font-normal text-red-200/90 mt-0.5">
+              Speaker is warning of immediate danger, sounding an alert, or crying for help!
+            </div>
           </div>
         </div>
       )}
 
-      {/* ── AI Tone & Cognitive Summary Card (Constrained Height for Mobile) ── */}
+      {/* ── AI Tone & Cognitive Summary Card ── */}
       <div className="mx-2.5 sm:mx-3 mt-2 sm:mt-2.5 flex-shrink-0">
         {analysis?.summary ? (
           <div className={`p-3 sm:p-3.5 rounded-2xl border backdrop-blur-md transition-all shadow-xl max-h-40 sm:max-h-52 overflow-y-auto ${currentToneClass}`}>
@@ -463,7 +568,9 @@ function HearingAssistant() {
 
             {analysis.key_points && analysis.key_points.length > 0 && (
               <div className="mt-2 pt-1.5 border-t border-white/15">
-                <p className="text-[0.6rem] sm:text-[0.62rem] uppercase tracking-wider opacity-70 font-bold mb-1 font-mono">Key Takeaways:</p>
+                <p className="text-[0.6rem] sm:text-[0.62rem] uppercase tracking-wider opacity-70 font-bold mb-1 font-mono">
+                  Key Takeaways:
+                </p>
                 <ul className="space-y-1">
                   {analysis.key_points.map((pt, i) => (
                     <li key={i} className="text-xs opacity-90 flex items-start gap-1.5">
@@ -481,7 +588,7 @@ function HearingAssistant() {
               {isRecording ? (
                 <span className="flex items-center justify-center gap-2 text-red-400 font-bold animate-pulse">
                   <span className="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-red-400 animate-ping"></span>
-                  Listening ({recordSeconds}s)... Tap "Stop & Transcribe"
+                  Listening ({recordSeconds}s / {MAX_RECORD_SECONDS}s)... Tap "Stop & Transcribe"
                 </span>
               ) : isProcessing ? (
                 <span className="flex items-center justify-center gap-2 text-zinc-300 font-bold">
@@ -496,7 +603,7 @@ function HearingAssistant() {
         )}
       </div>
 
-      {/* ── Audio Visualizer Spectrum (Visible While Recording) ── */}
+      {/* ── Audio Visualizer Spectrum ── */}
       {isRecording && (
         <div className="mx-3 mt-2 px-3.5 py-2.5 rounded-xl bg-zinc-900/90 border border-zinc-800 flex items-center justify-between gap-3 flex-shrink-0 shadow-sm">
           <div className="flex items-center gap-2 flex-shrink-0">
@@ -506,7 +613,6 @@ function HearingAssistant() {
             </span>
           </div>
 
-          {/* 16-Bar Spectrum Equalizer */}
           <div className="flex-1 flex items-center justify-center gap-1 h-6 px-2">
             {[35, 60, 45, 80, 95, 65, 85, 50, 75, 90, 40, 70, 85, 55, 75, 45].map((baseH, idx) => {
               const dynamicH = Math.min(100, Math.max(15, (audioLevel / 100) * baseH * 1.3));
@@ -539,7 +645,6 @@ function HearingAssistant() {
         )}
 
         {transcript.map((line, i) => {
-          // Check if text has acoustic bracket sounds e.g. [horn], [siren]
           const parts = line.text.split(/(\[[^\]]+\])/g);
           return (
             <div key={i} className="flex gap-3 items-start p-3 rounded-2xl bg-zinc-900/50 border border-zinc-800/80 hover:border-zinc-700/80 transition-colors shadow-sm">
@@ -579,33 +684,31 @@ function HearingAssistant() {
         </div>
       )}
 
-      {/* ── Two-Way Communication: Quick Speech Responses (Compact on Mobile) ── */}
+      {/* ── Quick Speech Responses ── */}
       <div className="px-2.5 sm:px-3.5 py-1.5 sm:py-2 border-t border-zinc-800/80 bg-zinc-950/70 flex-shrink-0 flex items-center gap-1.5 overflow-x-auto scrollbar-none">
         <span className="text-[0.6rem] sm:text-[0.62rem] text-zinc-500 font-bold uppercase font-mono flex-shrink-0">Quick TTS:</span>
         <button
-          onClick={() => speakReply("I am hard of hearing. Please speak clearly.")}
+          onClick={() => speakReply('I am hard of hearing. Please speak clearly.')}
           className="text-[0.65rem] sm:text-[0.68rem] px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white whitespace-nowrap border border-zinc-800 transition-colors cursor-pointer active:scale-95"
         >
           🔊 "I am hard of hearing"
         </button>
         <button
-          onClick={() => speakReply("Could you please repeat that?")}
+          onClick={() => speakReply('Could you please repeat that?')}
           className="text-[0.65rem] sm:text-[0.68rem] px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white whitespace-nowrap border border-zinc-800 transition-colors cursor-pointer active:scale-95"
         >
           🔊 "Please repeat that"
         </button>
         <button
-          onClick={() => speakReply("Yes, I understand. Thank you.")}
+          onClick={() => speakReply('Yes, I understand. Thank you.')}
           className="text-[0.65rem] sm:text-[0.68rem] px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white whitespace-nowrap border border-zinc-800 transition-colors cursor-pointer active:scale-95"
         >
           🔊 "Yes, I understand"
         </button>
       </div>
 
-      {/* ── Main Controls (Microphone & Custom Type) ── */}
+      {/* ── Main Controls ── */}
       <div className="p-2.5 sm:p-3.5 border-t border-zinc-800/80 bg-[#0c0c0e] flex-shrink-0 space-y-2 sm:space-y-2.5">
-
-        {/* Big Action Button */}
         {isRecording ? (
           <button
             onClick={stopRecording}
@@ -625,7 +728,6 @@ function HearingAssistant() {
           </button>
         )}
 
-        {/* Custom Text & TTS Reply Bar */}
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -660,9 +762,7 @@ function HearingAssistant() {
             <span>🔊</span> Speak
           </button>
         </form>
-
       </div>
-
     </div>
   );
 }

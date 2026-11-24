@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 
 /**
  * SpatialRadarPanel — 2D Spatial Proximity Radar & Real-Time Navigation Telemetry.
@@ -6,51 +6,63 @@ import { useState } from 'react';
  */
 function SpatialRadarPanel({ visionData }) {
   const [isReplayingSpeech, setIsReplayingSpeech] = useState(false);
+  const mountedRef = useRef(true);
 
-  const objects = visionData?.objects || [];
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const objects = visionData?.objects ?? [];
   const sceneDescription = visionData?.scene_description || visionData?.narration || '';
   const isCritical = visionData?.is_critical_hazard || false;
   const closestDist = visionData?.closest_distance_m;
 
-  // Replay speech helper
+  // Replay speech helper with Chrome Android 25ms cancel/resume fix
   const handleReplaySpeech = () => {
     if (!sceneDescription || typeof window === 'undefined' || !('speechSynthesis' in window)) return;
     setIsReplayingSpeech(true);
     window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(sceneDescription);
-    utterance.rate = 1.15;
-    utterance.onend = () => setIsReplayingSpeech(false);
-    utterance.onerror = () => setIsReplayingSpeech(false);
-    window.speechSynthesis.speak(utterance);
+    setTimeout(() => {
+      if (!mountedRef.current) return;
+      const utterance = new SpeechSynthesisUtterance(sceneDescription);
+      utterance.rate = 1.15;
+      utterance.onend = () => {
+        if (mountedRef.current) setIsReplayingSpeech(false);
+      };
+      utterance.onerror = () => {
+        if (mountedRef.current) setIsReplayingSpeech(false);
+      };
+      if (window.speechSynthesis.paused) {
+        window.speechSynthesis.resume();
+      }
+      window.speechSynthesis.speak(utterance);
+    }, 25);
   };
 
-  // Convert object bounding box or position ('on your left', 'ahead', 'on your right') and distance into (x, y) % on radar
-  // Radar coordinate space: User at bottom-center (50%, 90%)
+  // Convert object bounding box or position and distance into (x, y) % on radar
   const getRadarCoordinates = (obj, idx = 0) => {
-    const dist = Math.min(Math.max(obj.distance_m || 2.0, 0.4), 3.5); // clamp 0.4m to 3.5m
-    const normalizedDist = (dist - 0.3) / 3.2; // 0 (close) to 1 (far)
-    const radiusPct = 15 + normalizedDist * 65; // % distance from user point
+    const dist = Math.min(Math.max(obj.distance_m || 2.0, 0.4), 3.5);
+    const normalizedDist = (dist - 0.3) / 3.2;
+    const radiusPct = 15 + normalizedDist * 65;
 
     let angleDeg = 0;
     const frameW = visionData?.frame_size?.width;
     if (obj.box && frameW && frameW > 0) {
-      // Pinpoint continuous azimuth from bounding box horizontal center
       const centerX = (obj.box.x1 + obj.box.x2) / 2;
-      const normalizedX = centerX / frameW; // 0.0 (far left) to 1.0 (far right)
-      angleDeg = (normalizedX - 0.5) * 80; // maps to -40deg .. +40deg smoothly
-    } else {
-      // Fallback if bounding box coordinates are unavailable
-      if (obj.position?.includes('left')) angleDeg = -32;
-      else if (obj.position?.includes('right')) angleDeg = 32;
-      else angleDeg = 0;
+      const normalizedX = centerX / frameW;
+      angleDeg = (normalizedX - 0.5) * 80;
+    } else if (obj.position?.includes('left')) {
+      angleDeg = -32;
+    } else if (obj.position?.includes('right')) {
+      angleDeg = 32;
     }
 
-    // Slight separation offset if multiple blips share nearby angles
-    const jitter = (idx % 3 - 1) * 3;
+    const jitter = ((idx % 3) - 1) * 3;
     angleDeg = Math.max(-42, Math.min(42, angleDeg + jitter));
 
-    // Convert polar (radius, angle from top 0) to cartesian %
-    // User is at (50, 90)
     const angleRad = (angleDeg - 90) * (Math.PI / 180);
     const x = 50 + radiusPct * Math.cos(angleRad) * 0.95;
     const y = 90 + radiusPct * Math.sin(angleRad) * 0.95;
@@ -68,7 +80,7 @@ function SpatialRadarPanel({ visionData }) {
             <h2 className="text-xs md:text-sm font-bold text-zinc-100 tracking-tight flex items-center gap-2">
               Spatial Proximity Radar
               <span className="text-[0.6rem] px-2 py-0.5 rounded-full bg-zinc-900 text-zinc-400 border border-zinc-800 font-mono">
-                360° FOV
+                80° FOV
               </span>
             </h2>
           </div>
@@ -93,11 +105,8 @@ function SpatialRadarPanel({ visionData }) {
 
       {/* Main Content Body */}
       <div className="flex-1 flex flex-col p-3 gap-3 min-h-0 overflow-y-auto">
-        
         {/* 2D Mini Radar Screen */}
         <div className="relative w-full aspect-[2/1.05] bg-[#0c0c0e] border border-zinc-800 rounded-xl overflow-hidden flex items-center justify-center shadow-inner">
-          
-          {/* Subtle Grid / Background Rings */}
           <div className="absolute inset-0 opacity-20 bg-[radial-gradient(rgba(255,255,255,0.15)_1px,transparent_1px)] [background-size:16px_16px]" />
 
           {/* Distance Arcs (1m, 2m, 3m) */}
@@ -127,6 +136,7 @@ function SpatialRadarPanel({ visionData }) {
             const { x, y } = getRadarCoordinates(obj, idx);
             const isCrit = obj.urgency === 'critical';
             const isWarn = obj.urgency === 'warning';
+            const key = obj.track_id !== undefined && obj.track_id !== -1 ? `track-${obj.track_id}` : `${obj.label}-${idx}`;
 
             const blipColor = isCrit
               ? 'bg-red-500 text-red-100 border-red-400 shadow-sm'
@@ -136,16 +146,14 @@ function SpatialRadarPanel({ visionData }) {
 
             return (
               <div
-                key={idx}
+                key={key}
                 className="absolute -translate-x-1/2 -translate-y-1/2 z-20 group transition-all duration-300"
                 style={{ left: `${x}%`, top: `${y}%` }}
               >
-                {/* Ping blip dot */}
                 <div className={`w-3 h-3 rounded-full border flex items-center justify-center ${blipColor} cursor-pointer`}>
                   <div className="w-1 h-1 rounded-full bg-white" />
                 </div>
 
-                {/* Micro Label Tag */}
                 <div className="absolute left-1/2 -translate-x-1/2 bottom-3.5 pointer-events-none opacity-90 group-hover:opacity-100 transition-opacity">
                   <span className={`text-[0.58rem] font-semibold px-1.5 py-0.5 rounded shadow whitespace-nowrap backdrop-blur-md border ${
                     isCrit ? 'bg-red-950/90 text-red-300 border-red-500/50' : 'bg-zinc-900/90 text-zinc-200 border-zinc-700'
@@ -209,7 +217,6 @@ function SpatialRadarPanel({ visionData }) {
             </div>
           </div>
         </div>
-
       </div>
     </div>
   );

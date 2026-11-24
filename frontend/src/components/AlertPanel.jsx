@@ -1,5 +1,15 @@
 import { useState, useEffect, useRef } from 'react';
 
+const EMOTION_EMOJI = {
+  happy: '😊',
+  sad: '😢',
+  angry: '😠',
+  surprise: '😲',
+  fear: '😨',
+  disgust: '🤢',
+  neutral: '😐',
+};
+
 function AlertPanel({ visionData }) {
   const [alerts, setAlerts] = useState([
     { id: 1, type: 'info', icon: '🟢', message: 'Vision AI & Spatial Engine Active', time: 'Just now' },
@@ -10,25 +20,24 @@ function AlertPanel({ visionData }) {
   const lastEmotionTimeRef = useRef(0);
   const lastEmotionLabelRef = useRef('');
 
-  const objects = visionData?.objects || [];
-  const emotions = visionData?.emotions || [];
+  const objects = visionData?.objects ?? [];
+  const emotions = visionData?.emotions ?? [];
   const dominantEmotion = emotions[0]?.emotion || '--';
   const closestDist = visionData?.closest_distance_m;
   const isCritical = visionData?.is_critical_hazard;
 
-  const emotionEmoji = {
-    happy: '😊', sad: '😢', angry: '😠', surprise: '😲',
-    fear: '😨', disgust: '🤢', neutral: '😐',
-  };
-
-  // Add real-time alerts when obstacles or faces enter frame (Throttled to prevent telemetry flood)
+  // Add real-time alerts when obstacles or faces enter frame (throttled to prevent telemetry flood)
   useEffect(() => {
     if (!visionData) return;
     const now = Date.now();
+    const frameObjects = visionData.objects ?? [];
+    const frameEmotions = visionData.emotions ?? [];
+    const frameClosest = visionData.closest_distance_m;
+    const frameCritical = visionData.is_critical_hazard;
 
-    // 1. Critical Obstacle Warning Alert (Throttled: 4s cooldown unless object changes)
-    if (isCritical && closestDist) {
-      const criticalObj = objects.find(o => o.urgency === 'critical') || objects[0];
+    // 1. Critical Obstacle Warning Alert (4s cooldown unless object changes)
+    if (frameCritical && frameClosest) {
+      const criticalObj = frameObjects.find((o) => o.urgency === 'critical') || frameObjects[0];
       const objLabel = criticalObj?.label || 'Obstacle';
       const isCooldownOver = now - lastCriticalTimeRef.current > 4000;
       const isNewObject = objLabel !== lastCriticalLabelRef.current;
@@ -41,7 +50,7 @@ function AlertPanel({ visionData }) {
           id: now + 1,
           type: 'danger',
           icon: '⚠️',
-          message: `Collision hazard: ${objLabel} at ${closestDist}m ahead!`,
+          message: `Collision hazard: ${objLabel} at ${frameClosest}m ahead!`,
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
         };
 
@@ -49,9 +58,9 @@ function AlertPanel({ visionData }) {
       }
     }
 
-    // 2. Emotion alert (Throttled: 6s cooldown unless emotion changes)
-    if (emotions.length > 0) {
-      const emotion = emotions[0];
+    // 2. Emotion alert (6s cooldown unless emotion changes)
+    if (frameEmotions.length > 0) {
+      const emotion = frameEmotions[0];
       if (emotion.confidence > 60) {
         const emoName = emotion.emotion;
         const isCooldownOver = now - lastEmotionTimeRef.current > 6000;
@@ -64,7 +73,7 @@ function AlertPanel({ visionData }) {
           const newAlert = {
             id: now,
             type: emoName === 'angry' ? 'danger' : emoName === 'happy' ? 'info' : 'warning',
-            icon: emotionEmoji[emoName] || '👤',
+            icon: EMOTION_EMOJI[emoName] || '👤',
             message: `Person detected (${emoName}, ${Math.round(emotion.confidence)}% conf)`,
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
           };
@@ -73,32 +82,32 @@ function AlertPanel({ visionData }) {
         }
       }
     }
-  }, [visionData, isCritical, closestDist, emotions, objects]);
+  }, [visionData]);
 
   const stats = [
     {
       icon: '👁️',
       value: String(objects.length),
       label: 'Tracked',
-      highlight: objects.length > 0 ? 'text-zinc-100' : 'text-zinc-500'
+      highlight: objects.length > 0 ? 'text-zinc-100' : 'text-zinc-500',
     },
     {
       icon: '📏',
       value: closestDist ? `${closestDist}m` : 'Safe',
       label: 'Closest',
-      highlight: isCritical ? 'text-red-400 font-bold' : closestDist ? 'text-amber-300' : 'text-emerald-400'
+      highlight: isCritical ? 'text-red-400 font-bold' : closestDist ? 'text-amber-300' : 'text-emerald-400',
     },
     {
-      icon: emotionEmoji[dominantEmotion] || '👤',
+      icon: EMOTION_EMOJI[dominantEmotion] || '👤',
       value: dominantEmotion,
       label: 'Emotion',
-      highlight: 'text-zinc-300'
+      highlight: 'text-zinc-300',
     },
     {
       icon: '📡',
       value: isCritical ? 'Critical' : 'Normal',
       label: 'Reflex',
-      highlight: isCritical ? 'text-red-400' : 'text-emerald-400'
+      highlight: isCritical ? 'text-red-400' : 'text-emerald-400',
     },
   ];
 

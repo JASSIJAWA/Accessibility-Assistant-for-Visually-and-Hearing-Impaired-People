@@ -1,9 +1,9 @@
 """
 Scene AI — Gemini Vision API for intelligent scene understanding.
 
-Uses google.genai SDK with gemini-3.8-flash model.
-Sends camera frames + YOLO detection context every ~8 seconds.
-Handles rate limits with automatic backoff and recovery.
+Uses google.genai SDK with gemini-3.5-flash-lite primary + gemini-3.8-flash fallback.
+Sends camera frames + YOLO detection context at an adaptive rate-limited interval.
+Isolates per-client timing/descriptions via SceneSession while sharing rate-limit backoff cleanly.
 """
 
 import os
@@ -16,16 +16,16 @@ from typing import Optional, List
 logger = logging.getLogger("assistive-backend")
 
 _client = None
-_last_call_time = 0.0
-_last_description = ""
-_lock = threading.Lock()
+_client_lock = threading.Lock()
 _initialized = False
 
-# Start at 3.5s interval for responsive, smooth navigation guidance
-_current_interval = 3.5
 MIN_INTERVAL = 3.5
-MAX_INTERVAL = 35.0  # Back off up to 35s on rate limit
-_rate_limited_until = 0.0  # Timestamp when rate limit expires
+MAX_INTERVAL = 35.0
+
+# Shared API-key backoff state across sessions
+_api_lock = threading.Lock()
+_shared_interval = MIN_INTERVAL
+_rate_limited_until = 0.0
 
 SCENE_PROMPT = """You are a real-time live navigation guide for a visually impaired person walking forward with their phone.
 
@@ -45,33 +45,39 @@ Example: "Path open. Person approaching 3 meters ahead." """
 
 
 def _get_client():
+    """Thread-safe lazy initialization of the Gemini client."""
     global _client, _initialized
     if _initialized:
         return _client
 
-    _initialized = True
+    with _client_lock:
+        if _initialized:
+            return _client
 
-    api_key = os.environ.get("GEMINI_API_KEY", "")
-    if not api_key:
+        api_key = os.environ.get("GEMINI_API_KEY", "")
+        if not api_key:
+            try:
+                from dotenv import load_dotenv
+                load_dotenv()
+                api_key = os.environ.get("GEMINI_API_KEY", "")
+            except ImportError:
+                pass
+
+        if not api_key:
+            logger.warning("GEMINI_API_KEY not set. Scene AI disabled.")
+            _initialized = True
+            return None
+
         try:
-            from dotenv import load_dotenv
-            load_dotenv()
-            api_key = os.environ.get("GEMINI_API_KEY", "")
-        except ImportError:
-            pass
+            from google import genai
+            _client = genai.Client(api_key=api_key)
+            logger.info("Gemini Scene AI initialized (gemini-3.5-flash-lite / gemini-3.8-flash)")
+        except Exception as e:
+            logger.error("Failed to initialize Gemini: %s", e)
+            _client = None
 
-    if not api_key:
-        logger.warning("GEMINI_API_KEY not set. Scene AI disabled.")
-        return None
-
-    try:
-        from google import genai
-        _client = genai.Client(api_key=api_key)
-        logger.info("Gemini Scene AI initialized (gemini-3.8-flash)")
+        _initialized = True
         return _client
-    except Exception as e:
-        logger.error("Failed to initialize Gemini: %s", e)
-        return None
 
 
 def _format_detections(objects: List[dict]) -> str:
@@ -91,88 +97,114 @@ def _format_detections(objects: List[dict]) -> str:
     return "\n".join(lines)
 
 
+class SceneSession:
+    """Per-connection scene narration state to prevent cross-client starvation."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._last_call_time = 0.0
+        self._last_description = ""
+
+    def describe_scene(self, frame_base64: str, objects: List[dict] = None) -> Optional[str]:
+        """Send a frame + YOLO detections to Gemini for scene understanding."""
+        global _shared_interval, _rate_limited_until
+
+        if not frame_base64:
+            return None
+
+        now = time.time()
+
+        with _api_lock:
+            if now < _rate_limited_until:
+                return None
+            interval = _shared_interval
+
+        with self._lock:
+            if now - self._last_call_time < interval:
+                return None
+            self._last_call_time = now
+
+        client = _get_client()
+        if client is None:
+            return None
+
+        try:
+            from google.genai import types
+
+            payload = frame_base64.split(",", 1)[1] if "," in frame_base64 else frame_base64
+            payload = payload.strip()
+            if not payload:
+                return None
+
+            image_bytes = base64.b64decode(payload)
+            if not image_bytes:
+                return None
+
+            det_text = _format_detections(objects or [])
+            prompt = SCENE_PROMPT.format(detections=det_text)
+
+            description = None
+            for model_name in ["gemini-3.5-flash-lite", "gemini-3.8-flash"]:
+                try:
+                    response = client.models.generate_content(
+                        model=model_name,
+                        contents=[
+                            prompt,
+                            types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
+                        ],
+                        config=types.GenerateContentConfig(
+                            max_output_tokens=35,
+                            temperature=0.1,
+                        ),
+                    )
+                    description = (response.text or "").strip()
+                    if description:
+                        break
+                except Exception as model_err:
+                    err_str = str(model_err).lower()
+                    if "503" in err_str or "unavailable" in err_str or "not_found" in err_str:
+                        continue
+                    raise model_err
+
+            if not description:
+                return None
+
+            with self._lock:
+                self._last_description = description
+
+            with _api_lock:
+                _shared_interval = MIN_INTERVAL
+
+            logger.info("Gemini: %s", description[:100])
+            return description
+
+        except Exception as e:
+            error_str = str(e).lower()
+
+            if "429" in str(e) or "rate" in error_str or "quota" in error_str or "resource" in error_str:
+                with _api_lock:
+                    _shared_interval = min(_shared_interval * 2, MAX_INTERVAL)
+                    _rate_limited_until = now + _shared_interval
+                    backoff = _shared_interval
+                logger.warning("Gemini rate limited. Backing off to %.0fs", backoff)
+            else:
+                logger.error("Gemini API error: %s", e)
+
+            return None
+
+    def get_last_description(self) -> str:
+        with self._lock:
+            return self._last_description
+
+
+_default_session = SceneSession()
+
+
 def describe_scene(frame_base64: str, objects: List[dict] = None) -> Optional[str]:
-    """
-    Send a frame + YOLO detections to Gemini for scene understanding.
-    Rate-limited with automatic backoff on errors.
-    """
-    global _last_call_time, _last_description, _current_interval, _rate_limited_until
-
-    now = time.time()
-
-    # If rate limited, wait it out
-    if now < _rate_limited_until:
-        return None
-
-    if now - _last_call_time < _current_interval:
-        return None
-
-    client = _get_client()
-    if client is None:
-        return None
-
-    with _lock:
-        if now - _last_call_time < _current_interval:
-            return None
-        _last_call_time = now
-
-    try:
-        from google.genai import types
-
-        if "," in frame_base64:
-            frame_base64 = frame_base64.split(",")[1]
-
-        image_bytes = base64.b64decode(frame_base64)
-
-        det_text = _format_detections(objects or [])
-        prompt = SCENE_PROMPT.format(detections=det_text)
-
-        description = None
-        for model_name in ["gemini-3.5-flash-lite", "gemini-3.8-flash"]:
-            try:
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=[
-                        prompt,
-                        types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
-                    ],
-                    config=types.GenerateContentConfig(
-                        max_output_tokens=35,
-                        temperature=0.1,
-                    ),
-                )
-                description = response.text.strip()
-                if description:
-                    break
-            except Exception as model_err:
-                err_str = str(model_err).lower()
-                if "503" in err_str or "unavailable" in err_str or "not_found" in err_str:
-                    continue
-                raise model_err
-
-        if not description:
-            return None
-
-        _last_description = description
-
-        # Success — reset interval to normal
-        _current_interval = MIN_INTERVAL
-        logger.info("Gemini: %s", description[:100])
-        return description
-
-    except Exception as e:
-        error_str = str(e).lower()
-
-        if "429" in str(e) or "rate" in error_str or "quota" in error_str or "resource" in error_str:
-            # Rate limited — back off
-            _current_interval = min(_current_interval * 2, MAX_INTERVAL)
-            _rate_limited_until = now + _current_interval
-            logger.warning("Gemini rate limited. Backing off to %.0fs", _current_interval)
-        else:
-            logger.error("Gemini API error: %s", e)
-
-        return None
+    """Module-level helper delegating to the default SceneSession."""
+    return _default_session.describe_scene(frame_base64, objects)
 
 
 def get_last_description() -> str:
-    return _last_description
+    """Return last description from the default SceneSession."""
+    return _default_session.get_last_description()
