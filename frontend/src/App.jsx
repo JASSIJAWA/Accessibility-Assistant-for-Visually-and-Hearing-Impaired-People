@@ -8,6 +8,7 @@ function App() {
   const [visionData, setVisionData] = useState(null);
   const [activeTab, setActiveTab] = useState('vision'); // 'vision' | 'hearing'
   const [isGuidanceActive, setIsGuidanceActive] = useState(false);
+  const [mobileVisionTab, setMobileVisionTab] = useState('radar'); // 'radar' | 'alerts' (mobile sub-tab)
 
   const handleDetectionUpdate = useCallback((data) => {
     setVisionData(data);
@@ -71,13 +72,13 @@ function App() {
 
         {/* Top Header Bar (Hidden in Fullscreen Guidance) */}
         {!isGuidanceActive && (
-          <header className="glass-panel border-b border-white/[0.08] px-4 md:px-6 py-2.5 md:py-3.5 flex items-center justify-between flex-shrink-0">
+          <header className="glass-panel border-b border-white/[0.08] px-3.5 sm:px-4 md:px-6 py-2 sm:py-2.5 md:py-3.5 pt-safe flex items-center justify-between flex-shrink-0">
             {/* Title & Brand */}
-            <div className="flex items-center gap-3">
-              <span className="text-2xl md:hidden">♿</span>
+            <div className="flex items-center gap-2.5">
+              <span className="text-xl sm:text-2xl md:hidden">♿</span>
               <div>
-                <div className="flex items-center gap-2">
-                  <h1 className="text-base md:text-lg font-black tracking-tight bg-gradient-to-r from-purple-300 via-indigo-200 to-cyan-300 bg-clip-text text-transparent">
+                <div className="flex items-center gap-1.5 sm:gap-2">
+                  <h1 className="text-sm sm:text-base md:text-lg font-black tracking-tight bg-gradient-to-r from-purple-300 via-indigo-200 to-cyan-300 bg-clip-text text-transparent">
                     OMNI-ACCESS AI
                   </h1>
                   <span className="hidden sm:inline-block text-[0.62rem] font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 uppercase tracking-widest font-mono">
@@ -123,24 +124,24 @@ function App() {
                 </span>
               </div>
 
-              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/25">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                <span className="text-[0.65rem] font-bold text-emerald-400 font-mono tracking-wider">LIVE</span>
+              <div className="flex items-center gap-1.5 px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-full bg-emerald-500/10 border border-emerald-500/25">
+                <span className="w-1.5 sm:w-2 h-1.5 sm:h-2 rounded-full bg-emerald-400 animate-ping" />
+                <span className="text-[0.6rem] sm:text-[0.65rem] font-bold text-emerald-400 font-mono tracking-wider">LIVE</span>
               </div>
             </div>
           </header>
         )}
 
         {/* Dashboard Content Grid */}
-        <main className={`flex-1 flex flex-col ${isGuidanceActive ? 'p-0 m-0 h-[100dvh] w-full overflow-hidden' : 'p-3 md:p-4 min-h-0 overflow-y-auto lg:overflow-hidden pb-20 md:pb-4'}`}>
+        <main className={`flex-1 flex flex-col ${isGuidanceActive ? 'p-0 m-0 h-[100dvh] w-full overflow-hidden' : 'p-2 sm:p-3 md:p-4 min-h-0 overflow-y-auto lg:overflow-hidden pb-20 md:pb-4'}`}>
 
           {/* Vision View Grid */}
-          <div className={`flex-1 flex flex-col ${isGuidanceActive ? 'w-full h-full' : 'lg:grid lg:grid-cols-[1.35fr_1fr] lg:grid-rows-[1.45fr_1fr] gap-3 h-full'} ${activeTab === 'vision' ? '' : 'hidden'}`}>
+          <div className={`flex-1 flex flex-col ${isGuidanceActive ? 'w-full h-full' : 'lg:grid lg:grid-cols-[1.35fr_1fr] lg:grid-rows-[1.45fr_1fr] gap-2.5 md:gap-3 h-full'} ${activeTab === 'vision' ? '' : 'hidden'}`}>
             
             {/* Primary Camera Feed Viewport */}
             <div className={isGuidanceActive
               ? 'w-full h-full flex flex-col bg-black overflow-hidden'
-              : 'lg:row-span-2 glass-card rounded-2xl overflow-hidden flex flex-col min-h-[300px] lg:min-h-0 shadow-2xl relative'
+              : 'lg:row-span-2 glass-card rounded-2xl overflow-hidden flex flex-col min-h-[280px] sm:min-h-[320px] lg:min-h-0 shadow-2xl relative'
             }>
               <CameraFeed
                 onDetectionUpdate={handleDetectionUpdate}
@@ -150,23 +151,55 @@ function App() {
               />
             </div>
 
-            {/* Top Right: 2D Spatial Proximity Radar */}
+            {/* Mobile Sub-Tab Switcher (Only visible on mobile screens < lg) */}
             {!isGuidanceActive && (
-              <div className="glass-card rounded-2xl overflow-hidden flex flex-col min-h-[260px] lg:min-h-0 shadow-xl">
+              <div className="lg:hidden flex items-center justify-center p-1 bg-white/[0.04] border border-white/[0.08] rounded-xl my-0.5 flex-shrink-0 shadow-inner">
+                <button
+                  onClick={() => setMobileVisionTab('radar')}
+                  className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    mobileVisionTab === 'radar'
+                      ? 'bg-purple-600/90 text-white shadow-[0_0_12px_rgba(168,85,247,0.4)] border border-purple-400/40'
+                      : 'text-white/50 hover:text-white/80'
+                  }`}
+                >
+                  <span>📡</span>
+                  <span>Spatial Radar</span>
+                </button>
+                <button
+                  onClick={() => setMobileVisionTab('alerts')}
+                  className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    mobileVisionTab === 'alerts'
+                      ? 'bg-purple-600/90 text-white shadow-[0_0_12px_rgba(168,85,247,0.4)] border border-purple-400/40'
+                      : 'text-white/50 hover:text-white/80'
+                  }`}
+                >
+                  <span>🔔</span>
+                  <span>Live Telemetry</span>
+                </button>
+              </div>
+            )}
+
+            {/* Spatial Proximity Radar Panel (Always on desktop, conditional on mobile) */}
+            {!isGuidanceActive && (
+              <div className={`glass-card rounded-2xl overflow-hidden flex flex-col min-h-[250px] lg:min-h-0 shadow-xl ${
+                mobileVisionTab === 'radar' ? 'flex' : 'hidden lg:flex'
+              }`}>
                 <SpatialRadarPanel visionData={visionData} />
               </div>
             )}
 
-            {/* Bottom Right: Real-Time Event & Safety Telemetry */}
+            {/* Real-Time Event & Safety Telemetry Panel (Always on desktop, conditional on mobile) */}
             {!isGuidanceActive && (
-              <div className="glass-card rounded-2xl overflow-hidden flex flex-col min-h-[220px] lg:min-h-0 shadow-xl">
+              <div className={`glass-card rounded-2xl overflow-hidden flex flex-col min-h-[220px] lg:min-h-0 shadow-xl ${
+                mobileVisionTab === 'alerts' ? 'flex' : 'hidden lg:flex'
+              }`}>
                 <AlertPanel visionData={visionData} />
               </div>
             )}
           </div>
 
           {/* Hearing View Card */}
-          <div className={`flex-1 glass-card rounded-2xl overflow-hidden flex flex-col h-full min-h-[400px] shadow-2xl ${activeTab === 'hearing' && !isGuidanceActive ? '' : 'hidden'}`}>
+          <div className={`flex-1 glass-card rounded-2xl overflow-hidden flex flex-col h-full shadow-2xl ${activeTab === 'hearing' && !isGuidanceActive ? '' : 'hidden'}`}>
             <HearingAssistant />
           </div>
 
@@ -175,21 +208,24 @@ function App() {
 
       {/* Mobile Glassmorphic Bottom Navigation Bar */}
       {!isGuidanceActive && (
-        <nav className="md:hidden fixed bottom-0 left-0 right-0 glass-panel border-t border-white/[0.1] flex justify-around items-center py-2 px-4 z-50 shadow-[0_-5px_25px_rgba(0,0,0,0.5)]">
+        <nav
+          className="md:hidden fixed bottom-0 left-0 right-0 glass-panel border-t border-white/[0.1] flex justify-around items-center pt-1.5 z-50 shadow-[0_-5px_25px_rgba(0,0,0,0.6)]"
+          style={{ paddingBottom: 'max(0.65rem, env(safe-area-inset-bottom, 0.65rem))' }}
+        >
           {tabs.map(tab => {
             const isActive = activeTab === tab.id;
             return (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex flex-col items-center gap-0.5 px-4 py-1.5 rounded-xl transition-all cursor-pointer ${
+                className={`flex flex-col items-center gap-0.5 px-6 py-1.5 rounded-2xl transition-all cursor-pointer active:scale-95 ${
                   isActive
-                    ? 'bg-purple-500/25 text-purple-200 border border-purple-400/40 shadow-[0_0_12px_rgba(168,85,247,0.3)]'
+                    ? 'bg-purple-500/25 text-purple-200 border border-purple-400/40 shadow-[0_0_12px_rgba(168,85,247,0.3)] font-bold'
                     : 'text-white/40 hover:text-white/80'
                 }`}
               >
                 <span className="text-xl">{tab.icon}</span>
-                <span className="text-[0.62rem] font-bold tracking-tight">{tab.label}</span>
+                <span className="text-[0.62rem] tracking-tight">{tab.label}</span>
               </button>
             );
           })}
