@@ -43,10 +43,10 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
   const [recognizedText, setRecognizedText] = useState(null);
 
   const lastGeminiRef = useRef('');
-  const narrationTimerRef = useRef(null);
   const lastYoloAlertTimeRef = useRef(0);
   const audioCtxRef = useRef(null);
   const lastSonarPingRef = useRef(0);
+  const mountedRef = useRef(true);  // Prevents zombie reconnects after unmount
   const [isSonarEnabled, setIsSonarEnabled] = useState(true);
 
   const [facingMode, setFacingMode] = useState('environment');
@@ -182,7 +182,10 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
       ws.onclose = () => {
         console.log('❌ Vision WebSocket disconnected');
         setIsConnected(false);
-        setTimeout(connectWebSocket, 3000);
+        // Only reconnect if component is still mounted
+        if (mountedRef.current) {
+          setTimeout(connectWebSocket, 3000);
+        }
       };
 
       ws.onerror = () => {
@@ -237,7 +240,9 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         videoRef.current.onloadedmetadata = () => {
+          if (!videoRef.current) return;
           videoRef.current.play().then(() => {
+            if (!videoRef.current) return;
             setIsStreaming(true);
             setAspectRatio(videoRef.current.videoWidth / videoRef.current.videoHeight);
           }).catch(e => {
@@ -263,7 +268,9 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           videoRef.current.onloadedmetadata = () => {
+            if (!videoRef.current) return;
             videoRef.current.play().then(() => {
+              if (!videoRef.current) return;
               setIsStreaming(true);
               setAspectRatio(videoRef.current.videoWidth / videoRef.current.videoHeight);
             });
@@ -390,13 +397,20 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
 
   // Initialize camera and WebSocket on mount
   useEffect(() => {
+    mountedRef.current = true;
     startCamera(facingMode);
     connectWebSocket();
 
     return () => {
+      mountedRef.current = false;
       stopCamera();
       if (wsRef.current) wsRef.current.close();
       if (intervalRef.current) clearTimeout(intervalRef.current);
+      // Close AudioContext to prevent resource leak
+      if (audioCtxRef.current) {
+        audioCtxRef.current.close().catch(() => {});
+        audioCtxRef.current = null;
+      }
     };
   }, []);
 
@@ -476,7 +490,7 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
             <p className="font-semibold text-sm">⚠️ {error}</p>
             <button
               onClick={() => startCamera(facingMode)}
-              className="mt-4 px-6 py-2 bg-purple-500/30 border border-purple-500/40 rounded-xl text-white text-sm hover:bg-purple-500/50 transition-colors"
+              className="mt-4 px-6 py-2 bg-zinc-800 border border-zinc-700 rounded-xl text-white text-sm hover:bg-zinc-700 transition-colors cursor-pointer"
             >
               Retry Camera
             </button>
@@ -497,6 +511,7 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
             autoPlay
             playsInline
             muted
+            aria-label="Live camera feed for AI object detection"
             onLoadedMetadata={(e) => {
               if (e.target.videoWidth && e.target.videoHeight) {
                 setAspectRatio(e.target.videoWidth / e.target.videoHeight);

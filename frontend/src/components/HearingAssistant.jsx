@@ -70,6 +70,7 @@ function HearingAssistant() {
   // WebSocket Connection
   useEffect(() => {
     let reconnectTimeout = null;
+    let cancelled = false;
 
     const connect = () => {
       const ws = new WebSocket(getHearingWsUrl());
@@ -127,13 +128,17 @@ function HearingAssistant() {
       ws.onclose = () => {
         setIsProcessing(false);
         setIsConnected(false);
-        reconnectTimeout = setTimeout(connect, 3000);
+        // Only reconnect if not cancelled (component still mounted)
+        if (!cancelled) {
+          reconnectTimeout = setTimeout(connect, 3000);
+        }
       };
     };
 
     connect();
 
     return () => {
+      cancelled = true;  // Prevent zombie reconnects after unmount
       stopRecording();
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
       if (wsRef.current) wsRef.current.close();
@@ -485,7 +490,7 @@ function HearingAssistant() {
       )}
 
       {/* ── Live Transcripts / Captions Feed ── */}
-      <div className="flex-1 overflow-y-auto px-3.5 py-3 space-y-2.5 min-h-0">
+      <div className="flex-1 overflow-y-auto px-3.5 py-3 space-y-2.5 min-h-0" role="log" aria-label="Live speech transcripts" aria-live="polite">
         {transcript.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-zinc-600 text-xs text-center py-8">
             <div className="w-12 h-12 rounded-2xl bg-zinc-900/60 border border-zinc-800/80 flex items-center justify-center text-2xl mb-2 text-zinc-500">
@@ -597,6 +602,7 @@ function HearingAssistant() {
             value={replyText}
             onChange={(e) => setReplyText(e.target.value)}
             placeholder="Type spoken dialogue or reply..."
+            aria-label="Type a spoken dialogue or reply"
             className="flex-1 bg-zinc-900/90 border border-zinc-800 rounded-xl px-3 py-2 sm:px-3.5 sm:py-2.5 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-zinc-500 focus:bg-zinc-900 transition-all"
           />
           <button

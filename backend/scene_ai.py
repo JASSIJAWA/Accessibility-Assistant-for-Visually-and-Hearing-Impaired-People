@@ -9,8 +9,11 @@ Handles rate limits with automatic backoff and recovery.
 import os
 import time
 import base64
+import logging
 import threading
 from typing import Optional, List
+
+logger = logging.getLogger("assistive-backend")
 
 _client = None
 _last_call_time = 0.0
@@ -58,16 +61,16 @@ def _get_client():
             pass
 
     if not api_key:
-        print("⚠️  GEMINI_API_KEY not set. Scene AI disabled.")
+        logger.warning("GEMINI_API_KEY not set. Scene AI disabled.")
         return None
 
     try:
         from google import genai
         _client = genai.Client(api_key=api_key)
-        print("✅ Gemini Scene AI initialized (gemini-3.8-flash)")
+        logger.info("Gemini Scene AI initialized (gemini-3.8-flash)")
         return _client
     except Exception as e:
-        print(f"❌ Failed to initialize Gemini: {e}")
+        logger.error("Failed to initialize Gemini: %s", e)
         return None
 
 
@@ -154,7 +157,7 @@ def describe_scene(frame_base64: str, objects: List[dict] = None) -> Optional[st
 
         # Success — reset interval to normal
         _current_interval = MIN_INTERVAL
-        print(f"🧠 Gemini: {description[:100]}...", flush=True)
+        logger.info("Gemini: %s", description[:100])
         return description
 
     except Exception as e:
@@ -164,9 +167,9 @@ def describe_scene(frame_base64: str, objects: List[dict] = None) -> Optional[st
             # Rate limited — back off
             _current_interval = min(_current_interval * 2, MAX_INTERVAL)
             _rate_limited_until = now + _current_interval
-            print(f"⚠️ Gemini rate limited. Backing off to {_current_interval:.0f}s", flush=True)
+            logger.warning("Gemini rate limited. Backing off to %.0fs", _current_interval)
         else:
-            print(f"❌ Gemini API error: {e}", flush=True)
+            logger.error("Gemini API error: %s", e)
 
         return None
 

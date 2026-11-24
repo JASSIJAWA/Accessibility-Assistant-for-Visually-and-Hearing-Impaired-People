@@ -20,25 +20,28 @@ function App() {
   ];
 
   return (
-    <div className="relative flex flex-col md:flex-row h-screen bg-[#09090b] text-zinc-100 overflow-hidden font-sans selection:bg-zinc-800 selection:text-white">
+    <div className="relative flex flex-col md:flex-row h-screen bg-[#09090b] text-zinc-100 overflow-hidden font-sans selection:bg-zinc-800 selection:text-white" role="application" aria-label="AI Accessibility Assistant">
 
       {/* Sidebar — desktop (Hidden in Fullscreen Guidance) */}
-      <aside className={`${isGuidanceActive ? 'hidden' : 'hidden md:flex'} w-[72px] flex-shrink-0 bg-[#0c0c0e] border-r border-zinc-800/80 flex-col items-center py-5 z-20`}>
+      <aside className={`${isGuidanceActive ? 'hidden' : 'hidden md:flex'} w-[72px] flex-shrink-0 bg-[#0c0c0e] border-r border-zinc-800/80 flex-col items-center py-5 z-20`} aria-label="Main navigation">
         {/* Brand Icon */}
         <div className="relative mb-6 pb-4 border-b border-zinc-800/80 w-full flex items-center justify-center">
-          <div className="w-10 h-10 rounded-xl bg-zinc-900 border border-zinc-700/60 flex items-center justify-center text-zinc-100 shadow-sm">
+          <div className="w-10 h-10 rounded-xl bg-zinc-900 border border-zinc-700/60 flex items-center justify-center text-zinc-100 shadow-sm" aria-hidden="true">
             <span className="text-lg">♿</span>
           </div>
         </div>
 
         {/* Navigation Tabs */}
-        <nav className="flex flex-col gap-2.5 flex-1 w-full px-2.5">
+        <nav className="flex flex-col gap-2.5 flex-1 w-full px-2.5" role="tablist" aria-label="Mode selection">
           {tabs.map(tab => {
             const isActive = activeTab === tab.id;
             return (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
+                role="tab"
+                aria-selected={isActive}
+                aria-label={`${tab.label} — ${tab.subtitle}`}
                 className={`relative group w-full aspect-square rounded-xl flex flex-col items-center justify-center transition-all cursor-pointer ${
                   isActive
                     ? 'bg-zinc-800 text-white border border-zinc-700/60 shadow-sm'
@@ -194,7 +197,7 @@ function App() {
           </div>
 
           {/* Hearing View Card */}
-          <div className={`flex-1 glass-card rounded-2xl overflow-hidden flex flex-col h-full shadow-md ${activeTab === 'hearing' && !isGuidanceActive ? '' : 'hidden'}`}>
+          <div role="tabpanel" aria-label="Hearing and Speech Assistant" className={`flex-1 glass-card rounded-2xl overflow-hidden flex flex-col h-full shadow-md ${activeTab === 'hearing' && !isGuidanceActive ? '' : 'hidden'}`}>
             <HearingAssistant />
           </div>
 
@@ -206,6 +209,8 @@ function App() {
         <nav
           className="md:hidden fixed bottom-0 left-0 right-0 bg-[#0c0c0e]/95 border-t border-zinc-800/80 backdrop-blur-xl flex justify-around items-center pt-1.5 z-50 shadow-lg"
           style={{ paddingBottom: 'max(0.65rem, env(safe-area-inset-bottom, 0.65rem))' }}
+          role="tablist"
+          aria-label="Mode selection"
         >
           {tabs.map(tab => {
             const isActive = activeTab === tab.id;
@@ -213,6 +218,9 @@ function App() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
+                role="tab"
+                aria-selected={isActive}
+                aria-label={`${tab.label} — ${tab.subtitle}`}
                 className={`flex flex-col items-center gap-0.5 px-6 py-1.5 rounded-xl transition-all cursor-pointer active:scale-95 ${
                   isActive
                     ? 'bg-zinc-800 text-white border border-zinc-700/60 font-semibold'

@@ -2,7 +2,7 @@
 Vision AI Module — Enhanced with Visiona-inspired spatial intelligence.
 
 Features:
-  - YOLOv8 object detection
+  - YOLOv11 object detection (lazy-loaded)
   - Known-size distance estimation (meters + steps)
   - Spatial positioning (left/ahead/right)
   - Scene change detection (only narrate when scene changes)
@@ -12,12 +12,15 @@ Features:
   - Scene summary generation for TTS narration
 """
 
+import logging
 import cv2
 import numpy as np
 import base64
 import time
-from collections import Counter
+from collections import Counter, OrderedDict
 from ultralytics import YOLO
+
+logger = logging.getLogger("assistive-backend")
 
 # Lazy-load DeepFace to speed up startup
 _deepface = None
@@ -30,9 +33,16 @@ def get_deepface():
     return _deepface
 
 
-# Load YOLO11 medium model (much more accurate than v8 small)
-# Downloads automatically on first run (~50MB)
-yolo_model = YOLO("yolo11m.pt")
+# Lazy-load YOLO model (only on first frame, not at import time)
+_yolo_model = None
+
+def get_yolo():
+    global _yolo_model
+    if _yolo_model is None:
+        logger.info("Loading YOLO11m model...")
+        _yolo_model = YOLO("yolo11m.pt")
+        logger.info("YOLO11m model loaded successfully")
+    return _yolo_model
 
 
 # ─── Known real-world physical dimensions (meters) for calibrated distance estimation ───
@@ -106,8 +116,47 @@ REAL_OBJECT_METRICS = {
     "suitcase":      {"w": 0.45, "h": 0.65, "mode": "h"},
 }
 
-# Temporal distance memory to prevent flickering across frames
-_track_distance_history = {}
+# Simple irregular plural mappings for COCO class names
+_IRREGULAR_PLURALS = {
+    "person": "people",
+    "bus": "buses",
+    "knife": "knives",
+    "mouse": "mice",
+    "sheep": "sheep",
+}
+
+def _pluralize(label: str, count: int) -> str:
+    """Grammatically correct pluralization for COCO class labels."""
+    if count <= 1:
+        return label
+    if label in _IRREGULAR_PLURALS:
+        return _IRREGULAR_PLURALS[label]
+    return label + "s"
+
+
+# ─── LRU Distance History (per-track EMA smoothing) ─────────────────────────
+_MAX_TRACK_HISTORY = 150
+
+class _LRUDistanceHistory:
+    """LRU cache for distance smoothing. Evicts oldest entries instead of clearing all."""
+    def __init__(self, maxsize=_MAX_TRACK_HISTORY):
+        self._data = OrderedDict()
+        self._maxsize = maxsize
+
+    def get(self, track_id):
+        if track_id in self._data:
+            self._data.move_to_end(track_id)
+            return self._data[track_id]
+        return None
+
+    def set(self, track_id, value):
+        if track_id in self._data:
+            self._data.move_to_end(track_id)
+        self._data[track_id] = value
+        while len(self._data) > self._maxsize:
+            self._data.popitem(last=False)  # evict oldest
+
+_track_distance_history = _LRUDistanceHistory()
 
 # Scene memory for change detection
 _last_scene_key = ""
@@ -118,7 +167,10 @@ def decode_frame(base64_data: str) -> np.ndarray:
     """Decode a base64-encoded image string into an OpenCV frame."""
     if "," in base64_data:
         base64_data = base64_data.split(",")[1]
-    img_bytes = base64.b64decode(base64_data)
+    try:
+        img_bytes = base64.b64decode(base64_data)
+    except Exception:
+        return None
     img_array = np.frombuffer(img_bytes, dtype=np.uint8)
     frame = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
     return frame
@@ -130,10 +182,8 @@ def estimate_distance(label: str, box_w: float, box_h: float, frame_w: float, fr
     - Automatically scales focal length with frame resolution (FOV ~55°)
     - Uses dual-axis (width + height) to handle arbitrary camera angles and perspectives
     - Automatically detects standing vs sitting / torso for people
-    - Smooths distance across frames for tracked objects
+    - Smooths distance across frames for tracked objects via LRU EMA
     """
-    global _track_distance_history
-
     focal_px = frame_h * 0.98  # Standard phone camera focal length in pixels
 
     dim = REAL_OBJECT_METRICS.get(label)
@@ -172,10 +222,7 @@ def estimate_distance(label: str, box_w: float, box_h: float, frame_w: float, fr
         prev = _track_distance_history.get(track_id)
         if prev is not None:
             raw_dist = (0.7 * raw_dist) + (0.3 * prev)
-        _track_distance_history[track_id] = raw_dist
-
-    if len(_track_distance_history) > 150:
-        _track_distance_history.clear()
+        _track_distance_history.set(track_id, raw_dist)
 
     steps = max(1, round(raw_dist / 0.75))
     return {
@@ -212,8 +259,12 @@ def detect_objects(frame: np.ndarray, conf_threshold: float = 0.45) -> list:
     Run YOLO11 object detection with tracking + calibrated spatial awareness.
     Tracking assigns consistent IDs to objects across frames for smoother narration.
     """
+    if frame is None:
+        return []
+
     h, w = frame.shape[:2]
-    results = yolo_model.track(frame, verbose=False, conf=conf_threshold, persist=True, tracker="bytetrack.yaml")
+    model = get_yolo()
+    results = model.track(frame, verbose=False, conf=conf_threshold, persist=True, tracker="bytetrack.yaml")
     detections = []
 
     for result in results:
@@ -221,7 +272,7 @@ def detect_objects(frame: np.ndarray, conf_threshold: float = 0.45) -> list:
             x1, y1, x2, y2 = box.xyxy[0].tolist()
             confidence = float(box.conf[0])
             class_id = int(box.cls[0])
-            label = yolo_model.names[class_id]
+            label = model.names[class_id]
             track_id = int(box.id[0]) if box.id is not None else -1
 
             box_center_x = (x1 + x2) / 2
@@ -316,7 +367,7 @@ def build_scene_narration(objects: list, emotions: list) -> dict:
         count = hazard["count"]
         pos = hazard["position"]
         m = hazard["closest_m"]
-        name = f"{count} {label}s" if count > 1 else label
+        name = f"{count} {_pluralize(label, count)}" if count > 1 else label
 
         if hazard["urgency"] == "critical" or m <= 1.2:
             is_critical_hazard = True
@@ -425,7 +476,8 @@ def process_frame(base64_data: str) -> dict:
 
     elapsed = round((time.time() - start_t) * 1000)
     obj_summary = ", ".join(f"{o['label']}({o['distance_steps']}steps)" for o in objects[:3])
-    print(f"Frame {elapsed}ms | {len(objects)} objects [{obj_summary}] | {len(emotions)} faces | changed={narration['changed']}", flush=True)
+    logger.info("Frame %dms | %d objects [%s] | %d faces | changed=%s",
+                elapsed, len(objects), obj_summary, len(emotions), narration['changed'])
 
     return {
         "frame_size": {"width": w, "height": h},

@@ -3,6 +3,7 @@ AI Accessibility Assistant — Backend Server
 FastAPI + WebSocket server for real-time vision & audio processing.
 """
 
+import logging
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
@@ -13,32 +14,53 @@ import numpy as np
 import cv2
 from dotenv import load_dotenv
 from vision import process_frame
-from scene_ai import describe_scene, get_last_description
 from hearing_ai import analyze_conversation, reset_conversation, add_transcript_line, process_audio_chunk
+
+# ─── Logging Setup ───────────────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger("assistive-backend")
 
 # Load .env file for GEMINI_API_KEY
 load_dotenv()
 
 app = FastAPI(title="AI Assistive Backend")
 
-# Allow React frontend to communicate with Python backend
+# ─── CORS — Allow frontend origins (dev + mobile LAN) ────────────────────────
+# In production, replace with actual deployed frontend domain
+ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "https://localhost:5173",
+    "http://192.168.29.110:5173",
+    "https://192.168.29.110:5173",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Lazy-load EasyOCR (downloads model on first use, ~100MB)
+# ─── OCR (Lazy-loaded EasyOCR) ───────────────────────────────────────────────
 _ocr_reader = None
+
+# Max base64 payload size for OCR (10MB decoded ≈ ~13.3MB base64)
+MAX_OCR_BASE64_LEN = 14_000_000
+
 
 def get_ocr_reader():
     global _ocr_reader
     if _ocr_reader is None:
         import easyocr
-        _ocr_reader = easyocr.Reader(['en'], gpu=False)
-        print("✅ EasyOCR loaded")
+        import torch
+        _ocr_reader = easyocr.Reader(['en'], gpu=torch.cuda.is_available())
+        logger.info("EasyOCR loaded (GPU=%s)", torch.cuda.is_available())
     return _ocr_reader
 
 
@@ -48,7 +70,14 @@ def run_ocr(base64_data: str) -> dict:
     if "," in base64_data:
         base64_data = base64_data.split(",")[1]
 
-    img_bytes = base64.b64decode(base64_data)
+    if len(base64_data) > MAX_OCR_BASE64_LEN:
+        return {"error": "Image too large (>10MB)", "results": [], "text": ""}
+
+    try:
+        img_bytes = base64.b64decode(base64_data)
+    except Exception:
+        return {"error": "Invalid base64 data", "results": [], "text": ""}
+
     img_array = np.frombuffer(img_bytes, dtype=np.uint8)
     frame = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
 
@@ -113,10 +142,11 @@ async def ocr_endpoint(request: Request):
         result = await asyncio.to_thread(run_ocr, image_data)
         return result
     except Exception as e:
-        print(f"❌ OCR error: {e}")
+        logger.error("OCR error: %s", e)
         return {"error": str(e), "results": [], "text": ""}
 
 
+# ─── Vision WebSocket ────────────────────────────────────────────────────────
 @app.websocket("/ws/vision")
 async def vision_endpoint(websocket: WebSocket):
     """
@@ -125,12 +155,15 @@ async def vision_endpoint(websocket: WebSocket):
     - Gemini scene description runs every ~6 seconds (rich)
     """
     await websocket.accept()
-    print("✅ Vision WebSocket connected")
+    logger.info("Vision WebSocket connected")
 
     processing = False
     gemini_task = None
     last_gemini_description = ""
     new_gemini_available = False
+    frames_dropped = 0
+    frames_processed = 0
+    client_gone = False
 
     async def run_gemini_background(frame_data, objects):
         """Run Gemini in background without blocking YOLO."""
@@ -141,19 +174,23 @@ async def vision_endpoint(websocket: WebSocket):
                 last_gemini_description = desc
                 new_gemini_available = True
         except Exception as e:
-            print(f"❌ Gemini background error: {e}")
+            logger.warning("Gemini background error: %s", e)
 
     try:
         while True:
             data = await websocket.receive_text()
 
             if processing:
+                frames_dropped += 1
+                if frames_dropped % 50 == 0:
+                    logger.info("Frames dropped so far: %d (processed: %d)", frames_dropped, frames_processed)
                 continue
 
             processing = True
             try:
                 # Run YOLO + emotions (fast, every frame)
                 result = await asyncio.to_thread(process_frame, data)
+                frames_processed += 1
 
                 # Kick off Gemini with YOLO results as context
                 if gemini_task is None or gemini_task.done():
@@ -169,20 +206,27 @@ async def vision_endpoint(websocket: WebSocket):
 
                 await websocket.send_text(json.dumps(result))
             except WebSocketDisconnect:
-                print("❌ Vision WebSocket disconnected (client closed)")
+                logger.info("Vision WebSocket disconnected (client closed)")
+                client_gone = True
                 break
             except Exception as e:
-                print(f"❌ Frame processing error: {e}", flush=True)
+                logger.error("Frame processing error: %s", e)
                 break
             finally:
                 processing = False
 
     except WebSocketDisconnect:
-        print("❌ Vision WebSocket disconnected")
+        logger.info("Vision WebSocket disconnected")
     except Exception as e:
-        print(f"❌ Vision WebSocket error: {e}")
+        logger.error("Vision WebSocket error: %s", e)
+    finally:
+        # Cancel any pending Gemini task
+        if gemini_task and not gemini_task.done():
+            gemini_task.cancel()
+        logger.info("Vision session ended. Processed: %d, Dropped: %d", frames_processed, frames_dropped)
 
 
+# ─── Hearing/Speech Analyze REST ─────────────────────────────────────────────
 @app.post("/api/hearing/analyze")
 async def hearing_analyze_text(request: Request):
     """Analyze conversation text via REST API."""
@@ -195,6 +239,7 @@ async def hearing_analyze_text(request: Request):
         return {"error": str(e)}
 
 
+# ─── Hearing WebSocket ───────────────────────────────────────────────────────
 @app.websocket("/ws/hearing")
 async def hearing_endpoint(websocket: WebSocket):
     """
@@ -205,49 +250,79 @@ async def hearing_endpoint(websocket: WebSocket):
     - Returns: summary, tone, key_points, is_urgent, transcription
     """
     await websocket.accept()
-    print("✅ Hearing WebSocket connected")
+    logger.info("Hearing WebSocket connected")
 
     hearing_task = None
+    client_gone = False
 
     async def run_hearing_analysis(text: str):
         try:
             result = await asyncio.to_thread(analyze_conversation, text)
-            await websocket.send_text(json.dumps(result))
+            try:
+                await websocket.send_text(json.dumps(result))
+            except (WebSocketDisconnect, RuntimeError):
+                pass  # client disconnected while we were processing
         except Exception as e:
-            print(f"❌ Hearing analysis error: {e}")
+            logger.error("Hearing analysis error: %s", e)
 
     async def run_audio_analysis(audio_bytes: bytes, mime_type: str):
         try:
             clean_mime = mime_type.split(";")[0].strip() if mime_type else "audio/webm"
             result = await asyncio.to_thread(process_audio_chunk, audio_bytes, clean_mime)
-            await websocket.send_text(json.dumps(result))
+            try:
+                await websocket.send_text(json.dumps(result))
+            except (WebSocketDisconnect, RuntimeError):
+                pass  # client disconnected
         except Exception as e:
-            print(f"❌ Audio analysis error: {e}")
-            await websocket.send_text(json.dumps({
-                "error": str(e),
-                "summary": "Could not transcribe audio.",
-                "transcription": ""
-            }))
+            logger.error("Audio analysis error: %s", e)
+            try:
+                await websocket.send_text(json.dumps({
+                    "error": str(e),
+                    "summary": "Could not transcribe audio.",
+                    "transcription": ""
+                }))
+            except (WebSocketDisconnect, RuntimeError):
+                pass
 
     try:
         while True:
             data = await websocket.receive_text()
-            msg = json.loads(data)
+
+            # Validate JSON
+            try:
+                msg = json.loads(data)
+                if not isinstance(msg, dict):
+                    continue
+            except json.JSONDecodeError:
+                try:
+                    await websocket.send_text(json.dumps({"error": "Invalid JSON"}))
+                except (WebSocketDisconnect, RuntimeError):
+                    break
+                continue
 
             action = msg.get("action", "transcript")
 
             if action == "reset":
                 reset_conversation()
-                await websocket.send_text(json.dumps({"status": "reset"}))
+                try:
+                    await websocket.send_text(json.dumps({"status": "reset"}))
+                except (WebSocketDisconnect, RuntimeError):
+                    break
                 continue
 
             if action == "audio":
                 audio_base64 = msg.get("data", "")
                 mime_type = msg.get("mime_type", "audio/webm")
                 if audio_base64:
+                    # Size guard: reject audio payloads > 10MB base64
+                    if len(audio_base64) > MAX_OCR_BASE64_LEN:
+                        continue
                     if "," in audio_base64:
                         audio_base64 = audio_base64.split(",")[1]
-                    audio_bytes = base64.b64decode(audio_base64)
+                    try:
+                        audio_bytes = base64.b64decode(audio_base64)
+                    except Exception:
+                        continue
                     asyncio.create_task(run_audio_analysis(audio_bytes, mime_type))
                 continue
 
@@ -261,10 +336,27 @@ async def hearing_endpoint(websocket: WebSocket):
                         )
 
     except WebSocketDisconnect:
-        print("❌ Hearing WebSocket disconnected")
+        logger.info("Hearing WebSocket disconnected")
     except Exception as e:
-        print(f"❌ Hearing WebSocket error: {e}")
+        logger.error("Hearing WebSocket error: %s", e)
+    finally:
+        # Cancel any pending hearing task
+        if hearing_task and not hearing_task.done():
+            hearing_task.cancel()
+        logger.info("Hearing session ended")
+
+
+# ─── Import describe_scene here (after app setup) for the vision endpoint ────
+from scene_ai import describe_scene
 
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    import sys
+    reload = "--reload" in sys.argv
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=reload,
+        ws_max_size=5 * 1024 * 1024,  # 5MB max WebSocket message
+    )

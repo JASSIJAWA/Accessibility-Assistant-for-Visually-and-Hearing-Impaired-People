@@ -14,9 +14,12 @@ import os
 import io
 import time
 import json
+import logging
 import base64
 import wave
 from dotenv import load_dotenv
+
+logger = logging.getLogger("assistive-backend")
 
 load_dotenv()
 
@@ -48,9 +51,9 @@ def get_whisper():
     global _whisper_model
     if _whisper_model is None:
         from faster_whisper import WhisperModel
-        print("⚡ Loading Faster-Whisper base.en model on CPU (fallback)...")
+        logger.info("Loading Faster-Whisper base.en model on CPU (fallback)...")
         _whisper_model = WhisperModel("base.en", device="cpu", compute_type="int8")
-        print("✅ Faster-Whisper base.en ready as fallback engine")
+        logger.info("Faster-Whisper base.en ready as fallback engine")
     return _whisper_model
 
 
@@ -85,8 +88,10 @@ def convert_to_wav(audio_bytes: bytes) -> bytes:
         if len(result) > 44:
             return result
     except Exception as e:
-        print(f"⚠️ Audio converter notice: {e}")
+        logger.debug("Audio converter notice: %s", e)
 
+    # Conversion failed — return original bytes (may cause Gemini parsing issues)
+    logger.warning("Audio conversion to WAV failed; sending raw audio to Gemini")
     return audio_bytes
 
 
@@ -227,14 +232,15 @@ def transcribe_and_analyze_with_gemini(audio_bytes: bytes, mime_type: str = "aud
                 "is_urgent": is_urgent,
             }
             _on_success()
-            print(f"🎙️ Gemini Audio ({dt}ms) [{model_name}]: \"{transcription}\" | {tone} | Urgent={is_urgent}")
+            logger.info("Gemini Audio (%dms) [%s]: \"%s\" | %s | Urgent=%s",
+                        dt, model_name, transcription, tone, is_urgent)
             return _last_result
 
         except Exception as e:
             err = str(e).lower()
             if "429" in err or "quota" in err or "rate" in err or "503" in err:
                 _on_rate_limit()
-            print(f"⚠️ Gemini audio failed on {model_name}: {e}")
+            logger.warning("Gemini audio failed on %s: %s", model_name, e)
 
     return None
 
@@ -258,7 +264,7 @@ def transcribe_audio_whisper_fallback(audio_bytes: bytes) -> str:
         )
         return " ".join(seg.text.strip() for seg in segments).strip()
     except Exception as e:
-        print(f"❌ Whisper fallback error: {e}")
+        logger.error("Whisper fallback error: %s", e)
         return ""
 
 
@@ -280,13 +286,13 @@ def process_audio_chunk(audio_bytes: bytes, mime_type: str = "audio/webm") -> di
         return result
 
     # 2. Fallback: Local Whisper + Separate Gemini Text Analysis
-    print("⚡ Falling back to local Faster-Whisper base.en...")
+    logger.info("Falling back to local Faster-Whisper base.en...")
     t0 = time.time()
     transcription = transcribe_audio_whisper_fallback(audio_bytes)
     t_whisper = round((time.time() - t0) * 1000)
 
     if not transcription:
-        print(f"🎙️ Whisper ({t_whisper}ms): No speech detected")
+        logger.info("Whisper (%dms): No speech detected", t_whisper)
         return {
             "summary": "No speech detected in this audio segment.",
             "tone": "neutral",
@@ -296,7 +302,7 @@ def process_audio_chunk(audio_bytes: bytes, mime_type: str = "audio/webm") -> di
             "transcription": ""
         }
 
-    print(f"🎙️ Whisper ({t_whisper}ms): \"{transcription}\"")
+    logger.info("Whisper (%dms): \"%s\"", t_whisper, transcription)
     result = analyze_conversation(transcription)
     result["transcription"] = transcription
     return result
@@ -354,7 +360,7 @@ Analyze this and output ONLY valid JSON in this exact structure:
                 "transcription": transcript_text or "",
             }
             _on_success()
-            print(f"🎙️ Hearing Text AI: {_last_result['tone']} — {_last_result['summary'][:60]}...")
+            logger.info("Hearing Text AI: %s — %s", _last_result['tone'], _last_result['summary'][:60])
             return _last_result
 
         except Exception as e:
@@ -362,7 +368,7 @@ Analyze this and output ONLY valid JSON in this exact structure:
             if "429" in err or "quota" in err or "rate" in err or "503" in err:
                 _on_rate_limit()
             else:
-                print(f"❌ Hearing AI error with {model_name}: {e}")
+                logger.error("Hearing AI error with %s: %s", model_name, e)
 
     # Offline heuristic fallback
     urgent_words = ["danger", "watch out", "fire", "car", "stop", "help", "emergency", "run", "careful", "hospital"]
@@ -390,4 +396,4 @@ def reset_conversation():
         "is_urgent": False,
         "transcription": ""
     }
-    print("🔄 Hearing conversation reset")
+    logger.info("Hearing conversation reset")
