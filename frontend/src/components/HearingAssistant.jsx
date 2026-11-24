@@ -5,6 +5,32 @@ const getHearingWsUrl = () => {
   return `${protocol}//${window.location.host}/ws/hearing`;
 };
 
+// ─── Downsample raw Float32 PCM to 16kHz mono ────────────────────────────────
+function downsampleTo16k(inputSamples, inputSampleRate) {
+  if (!inputSamples || inputSamples.length === 0) return new Float32Array(0);
+  if (inputSampleRate === 16000) return inputSamples;
+
+  const ratio = inputSampleRate / 16000;
+  const newLength = Math.round(inputSamples.length / ratio);
+  const result = new Float32Array(newLength);
+  let offsetResult = 0;
+  let offsetInput = 0;
+
+  while (offsetResult < result.length) {
+    const nextOffsetInput = Math.round((offsetResult + 1) * ratio);
+    let accum = 0;
+    let count = 0;
+    for (let i = offsetInput; i < nextOffsetInput && i < inputSamples.length; i++) {
+      accum += inputSamples[i];
+      count++;
+    }
+    result[offsetResult] = count > 0 ? accum / count : 0;
+    offsetResult++;
+    offsetInput = nextOffsetInput;
+  }
+  return result;
+}
+
 // ─── Encode raw Float32 PCM to 16kHz mono WAV ────────────────────────────────
 function encodeWAV(samples, sampleRate = 16000) {
   const buffer = new ArrayBuffer(44 + samples.length * 2);
@@ -45,6 +71,7 @@ function HearingAssistant() {
   const mediaStreamRef = useRef(null);
   const processorRef = useRef(null);
   const pcmChunksRef = useRef([]);
+  const sampleRateRef = useRef(16000);
   const analyserRef = useRef(null);
   const animFrameRef = useRef(null);
   const recordTimerRef = useRef(null);
@@ -209,8 +236,15 @@ function HearingAssistant() {
       mediaStreamRef.current = stream;
 
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      const audioCtx = new AudioCtx({ sampleRate: 16000 });
+      let audioCtx;
+      try {
+        audioCtx = new AudioCtx({ sampleRate: 16000 });
+      } catch (e) {
+        // Fallback for mobile browsers enforcing hardware rates (44100/48000 Hz)
+        audioCtx = new AudioCtx();
+      }
       audioContextRef.current = audioCtx;
+      sampleRateRef.current = audioCtx.sampleRate || 16000;
 
       const source = audioCtx.createMediaStreamSource(stream);
 
@@ -289,14 +323,15 @@ function HearingAssistant() {
 
     // Merge PCM chunks and encode to 16kHz WAV
     const chunks = pcmChunksRef.current;
+    const currentRate = sampleRateRef.current || 16000;
     if (chunks.length > 0) {
       let totalLength = 0;
       for (let i = 0; i < chunks.length; i++) {
         totalLength += chunks[i].length;
       }
 
-      // Minimum ~0.4s of audio (6400 samples at 16kHz)
-      if (totalLength > 6400) {
+      // Minimum ~0.4s of audio (e.g. 6400 samples at 16kHz, 17640 at 44.1kHz)
+      if (totalLength > currentRate * 0.4) {
         const merged = new Float32Array(totalLength);
         let offset = 0;
         for (let i = 0; i < chunks.length; i++) {
@@ -304,7 +339,9 @@ function HearingAssistant() {
           offset += chunks[i].length;
         }
 
-        const wavBlob = encodeWAV(merged, 16000);
+        // Downsample Float32 to clean 16000Hz mono PCM
+        const pcm16k = downsampleTo16k(merged, currentRate);
+        const wavBlob = encodeWAV(pcm16k, 16000);
         if (wavBlob.size > 1000) {
           sendAudioBlob(wavBlob);
         }

@@ -13,6 +13,9 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
   const wsRef = useRef(null);
   const intervalRef = useRef(null);
   const isActiveRef = useRef(isActive);
+  const isSendingRef = useRef(false);
+  const sendTimeRef = useRef(0);
+  const ctxRef = useRef(null);
 
   useEffect(() => {
     isActiveRef.current = isActive;
@@ -79,26 +82,41 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
     }
   }, [isMuted, isSonarEnabled]);
 
-  // Safe TTS Speak Helper with Chrome Android resume support
+  // Safe TTS Speak Helper with Chrome Android cancel/resume fix
   const safeSpeak = useCallback((text) => {
     if (isMuted || !text || typeof window === 'undefined' || !('speechSynthesis' in window)) return;
     try {
       window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 1.15; // Snappy, prompt delivery
-      utterance.volume = 1.0;
-      if (window.speechSynthesis.paused) {
-        window.speechSynthesis.resume();
-      }
-      window.speechSynthesis.speak(utterance);
+      // 25ms async tick prevents Android Chrome bug where synchronous speak() is cancelled
+      setTimeout(() => {
+        if (!mountedRef.current) return;
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.rate = 1.15; // Snappy, prompt delivery
+        utterance.volume = 1.0;
+        if (window.speechSynthesis.paused) {
+          window.speechSynthesis.resume();
+        }
+        window.speechSynthesis.speak(utterance);
+      }, 25);
     } catch (e) {
       console.warn("TTS Error:", e);
     }
   }, [isMuted]);
 
-  // Downsample and send frame to backend
+  // Downsample and send frame to backend with backpressure guard
   const sendCurrentFrame = useCallback(() => {
     if (!isActiveRef.current || !videoRef.current || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    
+    // In-flight backpressure guard: prevents network buffer bloat & ECONNRESET
+    if (isSendingRef.current || (wsRef.current && wsRef.current.bufferedAmount > 16384)) {
+      if (Date.now() - sendTimeRef.current > 1500) {
+        // Watchdog: release lock if server response timed out
+        isSendingRef.current = false;
+      } else {
+        return; // Drop frame gracefully while previous frame is processing
+      }
+    }
+
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!canvas || video.videoWidth === 0) return;
@@ -118,13 +136,20 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
     }
     canvas.width = targetW;
     canvas.height = targetH;
-    const ctx = canvas.getContext('2d');
+    
+    if (!ctxRef.current || ctxRef.current.canvas !== canvas) {
+      ctxRef.current = canvas.getContext('2d', { willReadFrequently: true });
+    }
+    const ctx = ctxRef.current;
     ctx.drawImage(video, 0, 0, targetW, targetH);
     const base64 = canvas.toDataURL('image/jpeg', 0.55);
+
+    isSendingRef.current = true;
+    sendTimeRef.current = Date.now();
     wsRef.current.send(base64);
   }, []);
 
-  // Frame capture loop
+  // Frame capture fallback loop (watchdog)
   useEffect(() => {
     let isRunning = true;
 
@@ -133,7 +158,7 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
       if (isStreaming && isConnected) {
         sendCurrentFrame();
       }
-      intervalRef.current = setTimeout(captureAndSend, 1000);
+      intervalRef.current = setTimeout(captureAndSend, 1200);
     };
 
     if (isStreaming && isConnected) {
@@ -154,9 +179,13 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
       ws.onopen = () => {
         console.log('✅ Connected to Vision AI backend');
         setIsConnected(true);
+        isSendingRef.current = false;
       };
 
       ws.onmessage = (event) => {
+        // Release backpressure lock as soon as backend replies
+        isSendingRef.current = false;
+
         try {
           const result = JSON.parse(event.data);
           if (!result.error) {
@@ -164,15 +193,19 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
             if (onDetectionUpdate) onDetectionUpdate(result);
           }
 
-          // FAST LOOP: Instantly send next frame once processed
+          // FAST ADAPTIVE LOOP: Yield to GPU/React before capturing next frame
           if (isActiveRef.current && videoRef.current && videoRef.current.readyState >= 2 && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-            sendCurrentFrame();
+            setTimeout(() => {
+              requestAnimationFrame(() => {
+                sendCurrentFrame();
+              });
+            }, 20);
 
-            // Clear fallback timeout
+            // Reset watchdog timer
             if (intervalRef.current) clearTimeout(intervalRef.current);
             intervalRef.current = setTimeout(() => {
               sendCurrentFrame();
-            }, 1000);
+            }, 1200);
           }
         } catch (e) {
           console.error('Failed to parse AI result:', e);
@@ -181,6 +214,7 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
 
       ws.onclose = () => {
         console.log('❌ Vision WebSocket disconnected');
+        isSendingRef.current = false;
         setIsConnected(false);
         // Only reconnect if component is still mounted
         if (mountedRef.current) {
@@ -189,12 +223,14 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
       };
 
       ws.onerror = () => {
+        isSendingRef.current = false;
         setIsConnected(false);
       };
 
       wsRef.current = ws;
     } catch (e) {
       console.error('WebSocket connection failed:', e);
+      isSendingRef.current = false;
       setIsConnected(false);
     }
   }, [onDetectionUpdate, sendCurrentFrame]);
@@ -211,6 +247,36 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
     }
     setIsTorchOn(false);
   };
+
+  // Safe helper to bind MediaStream to video element without race conditions
+  const bindStreamToVideo = useCallback((stream) => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.srcObject = stream;
+
+    const playStream = () => {
+      if (!videoRef.current || !mountedRef.current) return;
+      videoRef.current.play().then(() => {
+        if (!videoRef.current || !mountedRef.current) return;
+        setIsStreaming(true);
+        setError(null);
+        const vw = videoRef.current.videoWidth;
+        const vh = videoRef.current.videoHeight;
+        if (vw && vh) setAspectRatio(vw / vh);
+      }).catch((e) => {
+        console.warn("Autoplay policy error:", e);
+        setError("Autoplay blocked. Tap anywhere on the camera to start.");
+      });
+    };
+
+    if (video.readyState >= 1) {
+      playStream();
+    } else {
+      video.onloadedmetadata = () => {
+        playStream();
+      };
+    }
+  }, []);
 
   // Start webcam
   const startCamera = async (mode = facingMode) => {
@@ -240,22 +306,7 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
         setHasTorch(Boolean(capabilities.torch));
       }
 
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.onloadedmetadata = () => {
-          if (!videoRef.current) return;
-          videoRef.current.play().then(() => {
-            if (!videoRef.current) return;
-            setIsStreaming(true);
-            const vw = videoRef.current.videoWidth;
-            const vh = videoRef.current.videoHeight;
-            if (vw && vh) setAspectRatio(vw / vh);
-          }).catch(e => {
-            console.error("Play error:", e);
-            setError("Could not autoplay camera. Please tap to enable.");
-          });
-        };
-      }
+      bindStreamToVideo(stream);
     } catch (err) {
       console.warn("High-res camera failed, falling back to basic:", err);
       try {
@@ -275,19 +326,7 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
           setHasTorch(Boolean(capabilities.torch));
         }
 
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.onloadedmetadata = () => {
-            if (!videoRef.current) return;
-            videoRef.current.play().then(() => {
-              if (!videoRef.current) return;
-              setIsStreaming(true);
-              const vw = videoRef.current.videoWidth;
-              const vh = videoRef.current.videoHeight;
-              if (vw && vh) setAspectRatio(vw / vh);
-            });
-          };
-        }
+        bindStreamToVideo(stream);
       } catch (fallbackErr) {
         console.error("Webcam access error:", fallbackErr);
         setError("Camera access denied or unavailable. Please check permissions.");
@@ -307,6 +346,7 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
   const toggleTorch = async () => {
     const track = mediaStreamRef.current?.getVideoTracks()[0];
     const nextState = !isTorchOn;
+    let hardwareTorchWorked = false;
 
     if (track) {
       try {
@@ -315,6 +355,7 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
           await track.applyConstraints({
             advanced: [{ torch: nextState }]
           });
+          hardwareTorchWorked = true;
         }
       } catch (err) {
         console.warn("Hardware torch error:", err);
@@ -322,7 +363,11 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
     }
 
     setIsTorchOn(nextState);
-    safeSpeak(nextState ? "Flashlight on." : "Flashlight off.");
+    if (nextState) {
+      safeSpeak(hardwareTorchWorked ? "Flashlight on." : "Screen light on.");
+    } else {
+      safeSpeak("Light off.");
+    }
   };
 
   // Guidance Toggle (Switches Fullscreen in App + Starts Spoken Guide)
@@ -494,13 +539,7 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
   }, [detections.new_gemini_guidance, detections.scene_description, detections.is_critical_hazard, isGuidanceActive, isReadingText, isActive, safeSpeak]);
 
   return (
-    <div
-      className={
-        isGuidanceActive
-          ? "fixed inset-0 z-50 bg-black flex flex-col w-full h-[100dvh] overflow-hidden select-none"
-          : "relative flex-1 w-full h-full flex flex-col overflow-hidden"
-      }
-    >
+    <div className="relative flex-1 w-full h-full flex flex-col overflow-hidden select-none">
       {/* Hidden canvas for frame capture */}
       <canvas ref={canvasRef} className="hidden" />
 
@@ -647,7 +686,26 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
             </div>
           </div>
         ) : (
-          <div className="relative flex items-center justify-center w-full h-full">
+          <div
+            onClick={() => {
+              if (videoRef.current && videoRef.current.paused) {
+                videoRef.current.play().then(() => {
+                  setError(null);
+                  setIsStreaming(true);
+                }).catch(() => {});
+              }
+            }}
+            className="relative flex items-center justify-center w-full h-full cursor-pointer"
+            title="Tap to focus or unlock camera"
+          >
+            {/* Screen Flashlight Illumination Fallback (when hardware torch unavailable) */}
+            {isTorchOn && !hasTorch && (
+              <div className="absolute inset-0 bg-white/90 z-25 pointer-events-none transition-opacity duration-300 flex items-center justify-center">
+                <span className="text-zinc-900 font-bold text-xs bg-white/80 px-3 py-1.5 rounded-full shadow">
+                  💡 Screen Light Active
+                </span>
+              </div>
+            )}
             <div
               className="relative flex items-center justify-center"
               style={{

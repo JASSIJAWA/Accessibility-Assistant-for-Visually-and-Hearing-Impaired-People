@@ -1,9 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 function AlertPanel({ visionData }) {
   const [alerts, setAlerts] = useState([
     { id: 1, type: 'info', icon: '🟢', message: 'Vision AI & Spatial Engine Active', time: 'Just now' },
   ]);
+
+  const lastCriticalTimeRef = useRef(0);
+  const lastCriticalLabelRef = useRef('');
+  const lastEmotionTimeRef = useRef(0);
+  const lastEmotionLabelRef = useRef('');
 
   const objects = visionData?.objects || [];
   const emotions = visionData?.emotions || [];
@@ -16,43 +21,56 @@ function AlertPanel({ visionData }) {
     fear: '😨', disgust: '🤢', neutral: '😐',
   };
 
-  // Add real-time alerts when obstacles or faces enter frame
+  // Add real-time alerts when obstacles or faces enter frame (Throttled to prevent telemetry flood)
   useEffect(() => {
     if (!visionData) return;
+    const now = Date.now();
 
-    // 1. Critical Obstacle Warning Alert
+    // 1. Critical Obstacle Warning Alert (Throttled: 4s cooldown unless object changes)
     if (isCritical && closestDist) {
       const criticalObj = objects.find(o => o.urgency === 'critical') || objects[0];
-      const newAlert = {
-        id: Date.now() + 1,
-        type: 'danger',
-        icon: '⚠️',
-        message: `Collision hazard: ${criticalObj?.label || 'Obstacle'} at ${closestDist}m ahead!`,
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-      };
+      const objLabel = criticalObj?.label || 'Obstacle';
+      const isCooldownOver = now - lastCriticalTimeRef.current > 4000;
+      const isNewObject = objLabel !== lastCriticalLabelRef.current;
 
-      setAlerts((prev) => {
-        if (prev[0] && prev[0].message === newAlert.message) return prev;
-        return [newAlert, ...prev].slice(0, 20);
-      });
-    }
+      if (isCooldownOver || isNewObject) {
+        lastCriticalTimeRef.current = now;
+        lastCriticalLabelRef.current = objLabel;
 
-    // 2. Emotion alert
-    if (emotions.length > 0) {
-      const emotion = emotions[0];
-      if (emotion.confidence > 60) {
         const newAlert = {
-          id: Date.now(),
-          type: emotion.emotion === 'angry' ? 'danger' : emotion.emotion === 'happy' ? 'info' : 'warning',
-          icon: emotionEmoji[emotion.emotion] || '👤',
-          message: `Person detected (${emotion.emotion}, ${Math.round(emotion.confidence)}% conf)`,
+          id: now + 1,
+          type: 'danger',
+          icon: '⚠️',
+          message: `Collision hazard: ${objLabel} at ${closestDist}m ahead!`,
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
         };
 
-        setAlerts((prev) => {
-          if (prev[0] && prev[0].message === newAlert.message) return prev;
-          return [newAlert, ...prev].slice(0, 20);
-        });
+        setAlerts((prev) => [newAlert, ...prev].slice(0, 20));
+      }
+    }
+
+    // 2. Emotion alert (Throttled: 6s cooldown unless emotion changes)
+    if (emotions.length > 0) {
+      const emotion = emotions[0];
+      if (emotion.confidence > 60) {
+        const emoName = emotion.emotion;
+        const isCooldownOver = now - lastEmotionTimeRef.current > 6000;
+        const isNewEmotion = emoName !== lastEmotionLabelRef.current;
+
+        if (isCooldownOver || isNewEmotion) {
+          lastEmotionTimeRef.current = now;
+          lastEmotionLabelRef.current = emoName;
+
+          const newAlert = {
+            id: now,
+            type: emoName === 'angry' ? 'danger' : emoName === 'happy' ? 'info' : 'warning',
+            icon: emotionEmoji[emoName] || '👤',
+            message: `Person detected (${emoName}, ${Math.round(emotion.confidence)}% conf)`,
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          };
+
+          setAlerts((prev) => [newAlert, ...prev].slice(0, 20));
+        }
       }
     }
   }, [visionData, isCritical, closestDist, emotions, objects]);

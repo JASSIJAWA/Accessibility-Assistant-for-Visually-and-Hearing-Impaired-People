@@ -61,15 +61,20 @@ def get_whisper():
 def convert_to_wav(audio_bytes: bytes) -> bytes:
     """
     Ensures audio is in 16kHz mono 16-bit PCM WAV.
-    If already WAV, returns as-is.
-    If WebM, MP4, OGG, or AAC, converts using PyAV.
+    Verifies actual sample rate, channels, and sample width via wave module.
+    If not 16kHz mono 16-bit, decodes & resamples using PyAV.
     """
     if not audio_bytes or len(audio_bytes) < 44:
         return audio_bytes
 
-    # Check if already a valid WAV
+    # Check if already a valid 16kHz mono 16-bit WAV
     if audio_bytes[:4] == b"RIFF" and b"WAVE" in audio_bytes[:16]:
-        return audio_bytes
+        try:
+            with wave.open(io.BytesIO(audio_bytes), 'rb') as wf:
+                if wf.getnchannels() == 1 and wf.getframerate() == 16000 and wf.getsampwidth() == 2:
+                    return audio_bytes
+        except Exception:
+            pass  # Fall through to PyAV resampler if WAV header is non-standard or corrupt
 
     try:
         import av

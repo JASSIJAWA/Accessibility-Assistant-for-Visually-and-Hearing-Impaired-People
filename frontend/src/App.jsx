@@ -135,7 +135,11 @@ function App() {
           <div className={`flex-1 flex flex-col lg:grid lg:grid-cols-[1.35fr_1fr] lg:grid-rows-[1.45fr_1fr] gap-2.5 md:gap-3 h-full ${activeTab === 'vision' ? '' : 'hidden'}`}>
             
             {/* Primary Camera Feed Viewport */}
-            <div className="lg:row-span-2 glass-card rounded-2xl overflow-hidden flex flex-col min-h-[280px] sm:min-h-[320px] lg:min-h-0 shadow-lg relative">
+            <div className={
+              isGuidanceActive
+                ? "fixed inset-0 z-50 bg-black flex flex-col w-screen h-[100dvh] overflow-hidden m-0 p-0"
+                : "lg:row-span-2 glass-card rounded-2xl overflow-hidden flex flex-col min-h-[280px] sm:min-h-[320px] lg:min-h-0 shadow-lg relative"
+            }>
               <CameraFeed
                 onDetectionUpdate={handleDetectionUpdate}
                 isActive={activeTab === 'vision'}
@@ -193,13 +197,14 @@ function App() {
         </main>
       </div>
 
-      {/* Mobile Glassmorphic Bottom Navigation Bar */}
-      <nav
-        className="md:hidden fixed bottom-0 left-0 right-0 bg-[#0c0c0e]/95 border-t border-zinc-800/80 backdrop-blur-xl flex justify-around items-center pt-1.5 z-40 shadow-lg"
-        style={{ paddingBottom: 'max(0.65rem, env(safe-area-inset-bottom, 0.65rem))' }}
-        role="tablist"
-        aria-label="Mode selection"
-      >
+      {/* Mobile Glassmorphic Bottom Navigation Bar (Hidden during Fullscreen Guidance) */}
+      {!isGuidanceActive && (
+        <nav
+          className="md:hidden fixed bottom-0 left-0 right-0 bg-[#0c0c0e]/95 border-t border-zinc-800/80 backdrop-blur-xl flex justify-around items-center pt-1.5 z-40 shadow-lg"
+          style={{ paddingBottom: 'max(0.65rem, env(safe-area-inset-bottom, 0.65rem))' }}
+          role="tablist"
+          aria-label="Mode selection"
+        >
           {tabs.map(tab => {
             const isActive = activeTab === tab.id;
             return (
@@ -221,6 +226,7 @@ function App() {
             );
           })}
         </nav>
+      )}
 
     </div>
   )

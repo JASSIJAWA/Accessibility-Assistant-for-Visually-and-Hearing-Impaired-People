@@ -24,17 +24,30 @@ function SpatialRadarPanel({ visionData }) {
     window.speechSynthesis.speak(utterance);
   };
 
-  // Convert object position ('on your left', 'ahead', 'on your right') and distance into (x, y) % on radar
-  // Radar coordinate space: User at bottom-center (50%, 92%)
-  const getRadarCoordinates = (obj) => {
+  // Convert object bounding box or position ('on your left', 'ahead', 'on your right') and distance into (x, y) % on radar
+  // Radar coordinate space: User at bottom-center (50%, 90%)
+  const getRadarCoordinates = (obj, idx = 0) => {
     const dist = Math.min(Math.max(obj.distance_m || 2.0, 0.4), 3.5); // clamp 0.4m to 3.5m
     const normalizedDist = (dist - 0.3) / 3.2; // 0 (close) to 1 (far)
     const radiusPct = 15 + normalizedDist * 65; // % distance from user point
 
-    // Angle offset: left = -35deg, ahead = 0deg, right = +35deg
     let angleDeg = 0;
-    if (obj.position?.includes('left')) angleDeg = -38;
-    else if (obj.position?.includes('right')) angleDeg = 38;
+    const frameW = visionData?.frame_size?.width;
+    if (obj.box && frameW && frameW > 0) {
+      // Pinpoint continuous azimuth from bounding box horizontal center
+      const centerX = (obj.box.x1 + obj.box.x2) / 2;
+      const normalizedX = centerX / frameW; // 0.0 (far left) to 1.0 (far right)
+      angleDeg = (normalizedX - 0.5) * 80; // maps to -40deg .. +40deg smoothly
+    } else {
+      // Fallback if bounding box coordinates are unavailable
+      if (obj.position?.includes('left')) angleDeg = -32;
+      else if (obj.position?.includes('right')) angleDeg = 32;
+      else angleDeg = 0;
+    }
+
+    // Slight separation offset if multiple blips share nearby angles
+    const jitter = (idx % 3 - 1) * 3;
+    angleDeg = Math.max(-42, Math.min(42, angleDeg + jitter));
 
     // Convert polar (radius, angle from top 0) to cartesian %
     // User is at (50, 90)
@@ -111,7 +124,7 @@ function SpatialRadarPanel({ visionData }) {
 
           {/* Plotted Object Blips */}
           {objects.slice(0, 8).map((obj, idx) => {
-            const { x, y } = getRadarCoordinates(obj);
+            const { x, y } = getRadarCoordinates(obj, idx);
             const isCrit = obj.urgency === 'critical';
             const isWarn = obj.urgency === 'warning';
 
