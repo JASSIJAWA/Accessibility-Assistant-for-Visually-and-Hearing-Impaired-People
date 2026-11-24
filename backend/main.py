@@ -47,14 +47,17 @@ _env_origins = [
 ]
 ALLOWED_ORIGINS = list(dict.fromkeys(_DEFAULT_ORIGINS + _env_origins))
 
-# Allow local RFC1918 Wi-Fi IPs on Vite dev ports so phone testing works even after DHCP renewals
+# Allow local RFC1918 Wi-Fi IPs on Vite dev ports so phone testing works even after DHCP renewals,
+# plus an optional CORS_ORIGIN_REGEX env var for cloud preview domains (e.g. ^https://.*\.vercel\.app$)
 _LAN_ORIGIN_REGEX = r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?$"
-_lan_pattern = re.compile(_LAN_ORIGIN_REGEX)
+_extra_origin_regex = os.environ.get("CORS_ORIGIN_REGEX", "").strip()
+_ALLOWED_ORIGIN_REGEX = f"(?:{_LAN_ORIGIN_REGEX})|(?:{_extra_origin_regex})" if _extra_origin_regex else _LAN_ORIGIN_REGEX
+_origin_pattern = re.compile(_ALLOWED_ORIGIN_REGEX)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_origin_regex=_LAN_ORIGIN_REGEX,
+    allow_origin_regex=_ALLOWED_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -67,7 +70,7 @@ def is_ws_origin_allowed(origin: str | None) -> bool:
         return True  # Native/CLI/proxied local test clients without Origin header
     if "*" in ALLOWED_ORIGINS or origin in ALLOWED_ORIGINS:
         return True
-    return bool(_lan_pattern.match(origin))
+    return bool(_origin_pattern.fullmatch(origin))
 
 
 # ─── OCR (Thread-safe lazy-loaded EasyOCR) ───────────────────────────────────

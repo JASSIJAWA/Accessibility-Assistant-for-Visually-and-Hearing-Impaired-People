@@ -260,3 +260,12 @@ def test_vision_ws_camera_config_and_calibration_ack():
         ack2 = ws.receive_json()
         assert ack2["type"] == "config_ack"
         assert abs(ack2["focal_factor"] - (0.78 * 1.8)) < 1e-4
+
+
+def test_cors_origin_regex_supports_vercel_previews():
+    """Verify optional CORS_ORIGIN_REGEX permits Vercel subdomains while blocking untrusted domains."""
+    import re
+    combined = re.compile(f"(?:{main._LAN_ORIGIN_REGEX})|(?:https://.*\\.vercel\\.app)")
+    with patch.object(main, "_origin_pattern", combined):
+        assert main.is_ws_origin_allowed("https://avha-preview-123.vercel.app") is True
+        assert main.is_ws_origin_allowed("https://evil-attacker.example") is False
