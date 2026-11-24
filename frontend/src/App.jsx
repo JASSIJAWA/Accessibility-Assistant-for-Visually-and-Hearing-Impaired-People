@@ -37,7 +37,7 @@ function App() {
     <div
       className="relative flex flex-col md:flex-row h-[100dvh] bg-[#09090b] text-zinc-100 overflow-hidden font-sans selection:bg-zinc-800 selection:text-white"
       role="application"
-      aria-label="AI Accessibility Assistant"
+      aria-label="AVHA — Assistant for Visual and Hearing Accessibility"
     >
       {/* Sidebar — desktop */}
       <aside
@@ -99,9 +99,9 @@ function App() {
             <span className="text-xl md:hidden">♿</span>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-sm sm:text-base font-bold tracking-tight text-white">OMNI-ACCESS</h1>
+                <h1 className="text-sm sm:text-base font-bold tracking-tight text-white">AVHA</h1>
                 <span className="hidden sm:inline-block text-[0.62rem] font-medium px-2 py-0.5 rounded-full bg-zinc-900 text-zinc-400 border border-zinc-800 font-mono">
-                  7th Sem Major Project
+                  Visual & Hearing Accessibility
                 </span>
               </div>
               <p className="hidden md:block text-[0.68rem] text-zinc-500 font-normal">
@@ -312,7 +312,10 @@ function App() {
             <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
               <div className="flex items-center gap-2">
                 <span className="text-xl">♿</span>
-                <h2 className="text-sm font-bold text-white tracking-tight">OMNI-ACCESS Architecture</h2>
+                <div>
+                  <h2 className="text-sm font-bold text-white tracking-tight">AVHA Architecture</h2>
+                  <p className="text-[0.65rem] text-zinc-500">Assistant for Visual & Hearing Accessibility</p>
+                </div>
               </div>
               <button
                 type="button"

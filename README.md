@@ -1,4 +1,4 @@
-# OMNI-ACCESS — AI Accessibility Assistant for Visually & Hearing Impaired People
+# AVHA — Assistant for Visual & Hearing Accessibility
 
 **7th Semester Capstone Major Project — Real-Time Multimodal Accessibility Assistant**
 
@@ -6,7 +6,7 @@
 
 ## Overview
 
-OMNI-ACCESS is a full-stack, mobile-first assistive platform engineered for both **visually impaired** and **hearing impaired** users. Running over HTTPS directly in a smartphone or desktop browser, it combines edge computer vision, monocular metric distance estimation, acoustic proximity sonar, OCR text reading, multimodal scene understanding, and bidirectional speech-to-text/TTS.
+**AVHA** (*Assistant for Visual & Hearing Accessibility*) is a full-stack, mobile-first assistive platform engineered for both **visually impaired** and **hearing impaired** users. Running over HTTPS directly in a smartphone or desktop browser, it combines edge computer vision, monocular metric distance estimation, acoustic proximity sonar, OCR text reading, multimodal scene understanding, and bidirectional speech-to-text/TTS.
 
 ---
 
