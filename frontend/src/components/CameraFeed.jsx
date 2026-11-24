@@ -55,14 +55,46 @@ function CameraFeed({
 
   const [facingMode, setFacingMode] = useState('environment');
   const [aspectRatio, setAspectRatio] = useState(4 / 3);
+  const [focalScale, setFocalScale] = useState(() => {
+    try {
+      const saved = parseFloat(localStorage.getItem('avha_focal_scale') || '1');
+      return Number.isFinite(saved) && saved >= 0.5 && saved <= 1.8 ? saved : 1.0;
+    } catch {
+      return 1.0;
+    }
+  });
+  const [calibrationNote, setCalibrationNote] = useState('');
 
+  const facingModeRef = useRef(facingMode);
+  const focalScaleRef = useRef(focalScale);
   const onDetectionUpdateRef = useRef(onDetectionUpdate);
   const onConnectionChangeRef = useRef(onConnectionChange);
 
   useEffect(() => {
+    facingModeRef.current = facingMode;
+    focalScaleRef.current = focalScale;
     onDetectionUpdateRef.current = onDetectionUpdate;
     onConnectionChangeRef.current = onConnectionChange;
-  }, [onDetectionUpdate, onConnectionChange]);
+  }, [facingMode, focalScale, onDetectionUpdate, onConnectionChange]);
+
+  const sendCameraConfig = useCallback((mode = facingModeRef.current, scale = focalScaleRef.current) => {
+    if (wsRef.current?.readyState !== WebSocket.OPEN) return;
+    const isMobileDevice =
+      typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    wsRef.current.send(
+      JSON.stringify({
+        type: 'config',
+        is_mobile: isMobileDevice,
+        facing_mode: mode,
+        focal_scale: scale,
+      }),
+    );
+  }, []);
+
+  const sendCameraConfigRef = useRef(sendCameraConfig);
+  useEffect(() => {
+    sendCameraConfigRef.current = sendCameraConfig;
+  }, [sendCameraConfig]);
 
   useEffect(() => {
     closestDistRef.current = detections.closest_distance_m ?? null;
@@ -216,6 +248,7 @@ function CameraFeed({
           setIsConnected(true);
           onConnectionChangeRef.current?.(true);
           isSendingRef.current = false;
+          sendCameraConfigRef.current?.();
         };
 
         ws.onmessage = (event) => {
@@ -224,6 +257,9 @@ function CameraFeed({
 
           try {
             const result = JSON.parse(event.data);
+            if (result.type === 'config_ack') {
+              return;
+            }
             if (!result.error) {
               setDetections(result);
               onDetectionUpdateRef.current?.(result);
@@ -410,7 +446,52 @@ function CameraFeed({
     const nextMode = facingMode === 'environment' ? 'user' : 'environment';
     setIsTorchOn(false);
     setFacingMode(nextMode);
+    sendCameraConfig(nextMode, focalScaleRef.current);
     startCamera(nextMode);
+  };
+
+  const handleCalibrate1m = () => {
+    const measured = detections.closest_distance_m;
+    if (!measured || measured <= 0) {
+      const msg = 'Point camera at an object 1 meter away first.';
+      setCalibrationNote(msg);
+      safeSpeak(msg);
+      setTimeout(() => {
+        if (mountedRef.current) setCalibrationNote('');
+      }, 3000);
+      return;
+    }
+    const nextScale = Math.max(0.5, Math.min(1.8, Number((focalScaleRef.current * (1.0 / measured)).toFixed(3))));
+    focalScaleRef.current = nextScale;
+    setFocalScale(nextScale);
+    try {
+      localStorage.setItem('avha_focal_scale', String(nextScale));
+    } catch {
+      // Ignore localStorage restrictions
+    }
+    sendCameraConfig(facingModeRef.current, nextScale);
+    const msg = `Calibrated to 1m (${Math.round(nextScale * 100)}% scale)`;
+    setCalibrationNote(msg);
+    safeSpeak('Calibrated to 1 meter');
+    setTimeout(() => {
+      if (mountedRef.current) setCalibrationNote('');
+    }, 3500);
+  };
+
+  const handleResetCalibration = () => {
+    focalScaleRef.current = 1.0;
+    setFocalScale(1.0);
+    try {
+      localStorage.removeItem('avha_focal_scale');
+    } catch {
+      // Ignore localStorage restrictions
+    }
+    sendCameraConfig(facingModeRef.current, 1.0);
+    setCalibrationNote('Calibration reset to default');
+    safeSpeak('Distance calibration reset');
+    setTimeout(() => {
+      if (mountedRef.current) setCalibrationNote('');
+    }, 3000);
   };
 
   // Toggle Hardware Flashlight (Torch) with Screen Illumination Fallback
@@ -1037,19 +1118,51 @@ function CameraFeed({
             </div>
           )}
 
-          <div className="p-3 border-t border-zinc-800/80 bg-[#0e0e11] flex-shrink-0 flex items-center gap-2.5">
+          {calibrationNote && (
+            <div className="px-3 py-1.5 border-t border-zinc-800/80 bg-emerald-500/10 text-emerald-300 text-[0.7rem] font-mono flex items-center justify-between flex-shrink-0">
+              <span className="truncate">{calibrationNote}</span>
+              <span className="opacity-70 ml-2">{Math.round(focalScale * 100)}%</span>
+            </div>
+          )}
+
+          <div className="p-3 border-t border-zinc-800/80 bg-[#0e0e11] flex-shrink-0 flex items-center gap-2">
             <button
               onClick={handleToggleGuidance}
-              className="flex-1 py-3 px-4 rounded-xl bg-white hover:bg-zinc-200 text-zinc-950 font-bold text-xs sm:text-sm shadow-sm flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-95"
+              className="flex-1 py-3 px-3.5 rounded-xl bg-white hover:bg-zinc-200 text-zinc-950 font-bold text-xs sm:text-sm shadow-sm flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-95"
             >
               <span className="text-base sm:text-lg">🔊</span>
-              <span className="tracking-wide">GUIDE ON (FULLSCREEN AI)</span>
+              <span className="tracking-wide truncate">GUIDE ON (FULLSCREEN AI)</span>
             </button>
+
+            <button
+              onClick={handleCalibrate1m}
+              disabled={!isStreaming || !detections.closest_distance_m}
+              title="Stand or place nearest object 1.0m away and tap to calibrate lens scale"
+              className={`px-3 py-3 rounded-xl border font-semibold text-xs sm:text-sm flex items-center justify-center gap-1 transition-all cursor-pointer active:scale-95 disabled:opacity-40 ${
+                Math.abs(focalScale - 1.0) > 0.03
+                  ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25'
+                  : 'bg-zinc-900 hover:bg-zinc-800 border-zinc-700/80 text-zinc-200'
+              }`}
+            >
+              <span>🎯</span>
+              <span className="font-mono text-xs">1m</span>
+            </button>
+
+            {Math.abs(focalScale - 1.0) > 0.03 && (
+              <button
+                onClick={handleResetCalibration}
+                title="Reset lens distance calibration"
+                aria-label="Reset lens distance calibration"
+                className="px-2.5 py-3 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700/80 text-zinc-400 hover:text-zinc-200 text-xs sm:text-sm transition-all cursor-pointer active:scale-95"
+              >
+                ↺
+              </button>
+            )}
 
             <button
               onClick={handleReadText}
               disabled={isReadingText || !isStreaming}
-              className="px-4 py-3 rounded-xl bg-zinc-900 hover:bg-zinc-800 disabled:opacity-40 border border-zinc-700/80 text-zinc-200 font-semibold text-xs sm:text-sm flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95"
+              className="px-3.5 py-3 rounded-xl bg-zinc-900 hover:bg-zinc-800 disabled:opacity-40 border border-zinc-700/80 text-zinc-200 font-semibold text-xs sm:text-sm flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95"
             >
               <span>📖</span>
               <span className="hidden sm:inline">{isReadingText ? 'READING...' : 'READ TEXT'}</span>

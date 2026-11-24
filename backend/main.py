@@ -242,6 +242,23 @@ async def vision_endpoint(websocket: WebSocket):
         while True:
             data = await websocket.receive_text()
 
+            if data.startswith("{"):
+                try:
+                    cfg = json.loads(data)
+                    if isinstance(cfg, dict) and cfg.get("type") == "config":
+                        vision_session.update_camera_config(
+                            is_mobile=bool(cfg.get("is_mobile", False)),
+                            facing_mode=str(cfg.get("facing_mode", "environment")),
+                            focal_scale=float(cfg.get("focal_scale", 1.0)),
+                        )
+                        await websocket.send_text(json.dumps({
+                            "type": "config_ack",
+                            "focal_factor": round(vision_session._focal_factor, 3),
+                        }))
+                        continue
+                except Exception:
+                    pass
+
             if processing:
                 frames_dropped += 1
                 if frames_dropped % 50 == 0:

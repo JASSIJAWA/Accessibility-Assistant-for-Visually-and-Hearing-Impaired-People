@@ -198,3 +198,65 @@ def test_real_yolo_bytetrack_deepface_websocket_end_to_end():
         assert "error" not in r2
         assert r2["object_count"] >= 1
         assert any(o["track_id"] != -1 for o in r2["objects"])
+
+
+def test_all_coco_classes_mapped_in_distance_metrics():
+    """Every YOLO COCO class should have an explicit calibrated physical dimension entry."""
+    model = vision.get_yolo()
+    model_classes = set(model.names.values())
+    assert len(model_classes) == 80
+    missing = sorted(cls for cls in model_classes if cls not in vision.REAL_OBJECT_METRICS)
+    assert not missing, f"Missing distance metrics for COCO classes: {missing}"
+
+
+def test_estimate_distance_handles_edge_clipping_and_lens_calibration():
+    """Edge-cropped objects fall back to the unclipped axis, and lens focal factor scales output."""
+    # Side-cropped bus: width clipped horizontally, height unclipped -> uses bus height (3.1m)
+    bus_res = vision.estimate_distance(
+        "bus",
+        box_w=800.0,
+        box_h=500.0,
+        frame_w=810.0,
+        frame_h=1080.0,
+        x1=0.0,
+        y1=220.0,
+        x2=800.0,
+        y2=720.0,
+        focal_factor=0.75,
+    )
+    assert 4.8 <= bus_res["distance_m"] <= 5.2
+
+    # Leg-cropped close-up person: bottom edge clipped -> uses shoulder width (0.45m), not full 1.68m height
+    person_res = vision.estimate_distance(
+        "person",
+        box_w=420.0,
+        box_h=600.0,
+        frame_w=1280.0,
+        frame_h=720.0,
+        x1=420.0,
+        y1=120.0,
+        x2=840.0,
+        y2=720.0,
+        focal_factor=0.75,
+    )
+    assert 0.9 <= person_res["distance_m"] <= 1.2
+
+    # Wide mobile rear lens (0.72) yields a closer reading than legacy narrow factor (0.92)
+    wide_chair = vision.estimate_distance("chair", 180.0, 260.0, 1280.0, 720.0, focal_factor=0.72)
+    narrow_chair = vision.estimate_distance("chair", 180.0, 260.0, 1280.0, 720.0, focal_factor=0.92)
+    assert wide_chair["distance_m"] < narrow_chair["distance_m"]
+
+
+def test_vision_ws_camera_config_and_calibration_ack():
+    """Verify /ws/vision applies camera config + clamped focal_scale and responds with config_ack."""
+    client = TestClient(main.app)
+    with client.websocket_connect("/ws/vision") as ws:
+        ws.send_json({"type": "config", "is_mobile": True, "facing_mode": "environment", "focal_scale": 0.8})
+        ack1 = ws.receive_json()
+        assert ack1["type"] == "config_ack"
+        assert abs(ack1["focal_factor"] - (0.72 * 0.8)) < 1e-4
+
+        ws.send_json({"type": "config", "is_mobile": False, "facing_mode": "user", "focal_scale": 5.0})
+        ack2 = ws.receive_json()
+        assert ack2["type"] == "config_ack"
+        assert abs(ack2["focal_factor"] - (0.78 * 1.8)) < 1e-4

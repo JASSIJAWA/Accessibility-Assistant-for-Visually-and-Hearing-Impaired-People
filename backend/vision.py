@@ -67,73 +67,101 @@ def _create_byte_tracker():
     return BYTETracker(args=cfg)
 
 
-# ─── Known real-world physical dimensions (meters) for COCO classes ──────────
+# ─── Known real-world physical dimensions (meters) for all 80 COCO classes ──
 REAL_OBJECT_METRICS = {
     # People & Living
-    "person":        {"w": 0.45, "h": 1.70, "mode": "person"},
+    "person":        {"w": 0.45, "h": 1.68, "mode": "person"},
     "dog":           {"w": 0.30, "h": 0.55, "mode": "h"},
     "cat":           {"w": 0.20, "h": 0.30, "mode": "h"},
     "horse":         {"w": 0.60, "h": 1.60, "mode": "h"},
     "sheep":         {"w": 0.40, "h": 0.70, "mode": "h"},
     "cow":           {"w": 0.70, "h": 1.50, "mode": "h"},
     "bird":          {"w": 0.15, "h": 0.20, "mode": "h"},
+    "elephant":      {"w": 1.60, "h": 3.00, "mode": "h"},
+    "bear":          {"w": 0.90, "h": 1.40, "mode": "h"},
+    "zebra":         {"w": 0.60, "h": 1.40, "mode": "h"},
+    "giraffe":       {"w": 0.90, "h": 4.50, "mode": "h"},
 
-    # Vehicles & Transportation
-    "car":           {"w": 1.80, "h": 1.50, "mode": "w"},
+    # Vehicles & Transportation (height-primary so side vs front angles stay accurate)
+    "car":           {"w": 1.80, "h": 1.50, "mode": "h"},
     "bicycle":       {"w": 0.60, "h": 1.05, "mode": "h"},
     "motorcycle":    {"w": 0.80, "h": 1.10, "mode": "h"},
-    "bus":           {"w": 2.50, "h": 3.20, "mode": "w"},
-    "truck":         {"w": 2.50, "h": 3.50, "mode": "w"},
-    "train":         {"w": 3.00, "h": 3.80, "mode": "w"},
-    "boat":          {"w": 2.00, "h": 1.50, "mode": "w"},
-    "airplane":      {"w": 8.00, "h": 3.00, "mode": "w"},
+    "bus":           {"w": 2.50, "h": 3.20, "mode": "h"},
+    "truck":         {"w": 2.50, "h": 3.40, "mode": "h"},
+    "train":         {"w": 3.00, "h": 3.80, "mode": "h"},
+    "boat":          {"w": 2.20, "h": 1.40, "mode": "h"},
+    "airplane":      {"w": 8.00, "h": 3.50, "mode": "h"},
 
     # Outdoor & Street Furniture
     "traffic light": {"w": 0.35, "h": 0.85, "mode": "h"},
     "fire hydrant":  {"w": 0.35, "h": 0.65, "mode": "h"},
-    "stop sign":     {"w": 0.75, "h": 0.75, "mode": "w"},
+    "stop sign":     {"w": 0.75, "h": 0.75, "mode": "avg"},
     "parking meter": {"w": 0.30, "h": 1.40, "mode": "h"},
-    "bench":         {"w": 1.40, "h": 0.80, "mode": "w"},
+    "bench":         {"w": 1.40, "h": 0.80, "mode": "h"},
 
-    # Indoor Furniture & Obstacles
-    "chair":         {"w": 0.50, "h": 0.85, "mode": "avg"},
-    "couch":         {"w": 1.80, "h": 0.85, "mode": "w"},
-    "dining table":  {"w": 1.20, "h": 0.75, "mode": "w"},
-    "bed":           {"w": 1.50, "h": 0.70, "mode": "w"},
+    # Indoor Furniture & Obstacles (height-primary for multi-angle invariance)
+    "chair":         {"w": 0.52, "h": 0.85, "mode": "avg"},
+    "couch":         {"w": 1.80, "h": 0.85, "mode": "h"},
+    "dining table":  {"w": 1.20, "h": 0.75, "mode": "h"},
+    "bed":           {"w": 1.50, "h": 0.70, "mode": "h"},
     "toilet":        {"w": 0.45, "h": 0.75, "mode": "h"},
     "potted plant":  {"w": 0.30, "h": 0.50, "mode": "h"},
 
     # Electronics & Office
-    "tv":            {"w": 0.90, "h": 0.55, "mode": "w"},
-    "laptop":        {"w": 0.33, "h": 0.23, "mode": "w"},
-    "mouse":         {"w": 0.065, "h": 0.11, "mode": "w"},
+    "tv":            {"w": 0.68, "h": 0.42, "mode": "h"},
+    "laptop":        {"w": 0.34, "h": 0.24, "mode": "w"},
+    "mouse":         {"w": 0.065, "h": 0.11, "mode": "avg"},
     "remote":        {"w": 0.05, "h": 0.18, "mode": "h"},
-    "keyboard":      {"w": 0.44, "h": 0.14, "mode": "w"},
-    "cell phone":    {"w": 0.075, "h": 0.15, "mode": "h"},
-    "book":          {"w": 0.16, "h": 0.24, "mode": "h"},
+    "keyboard":      {"w": 0.42, "h": 0.14, "mode": "w"},
+    "cell phone":    {"w": 0.075, "h": 0.15, "mode": "avg"},
+    "book":          {"w": 0.18, "h": 0.24, "mode": "avg"},
     "clock":         {"w": 0.30, "h": 0.30, "mode": "avg"},
+    "hair drier":    {"w": 0.20, "h": 0.22, "mode": "avg"},
 
-    # Kitchen & Household
+    # Kitchen, Food & Household
     "bottle":        {"w": 0.075, "h": 0.25, "mode": "h"},
     "wine glass":    {"w": 0.08, "h": 0.20, "mode": "h"},
-    "cup":           {"w": 0.085, "h": 0.10, "mode": "w"},
-    "fork":          {"w": 0.03, "h": 0.18, "mode": "h"},
+    "cup":           {"w": 0.085, "h": 0.10, "mode": "avg"},
+    "fork":          {"w": 0.03, "h": 0.19, "mode": "h"},
     "knife":         {"w": 0.03, "h": 0.22, "mode": "h"},
     "spoon":         {"w": 0.04, "h": 0.18, "mode": "h"},
     "bowl":          {"w": 0.16, "h": 0.08, "mode": "w"},
-    "microwave":     {"w": 0.50, "h": 0.30, "mode": "w"},
-    "oven":          {"w": 0.75, "h": 0.85, "mode": "avg"},
-    "toaster":       {"w": 0.28, "h": 0.20, "mode": "w"},
+    "microwave":     {"w": 0.50, "h": 0.30, "mode": "h"},
+    "oven":          {"w": 0.75, "h": 0.85, "mode": "h"},
+    "toaster":       {"w": 0.28, "h": 0.20, "mode": "avg"},
     "sink":          {"w": 0.55, "h": 0.40, "mode": "w"},
     "refrigerator":  {"w": 0.75, "h": 1.75, "mode": "h"},
     "vase":          {"w": 0.18, "h": 0.35, "mode": "h"},
+    "scissors":      {"w": 0.08, "h": 0.18, "mode": "avg"},
+    "toothbrush":    {"w": 0.025, "h": 0.18, "mode": "h"},
+    "teddy bear":    {"w": 0.25, "h": 0.35, "mode": "h"},
+    "banana":        {"w": 0.18, "h": 0.08, "mode": "w"},
+    "apple":         {"w": 0.08, "h": 0.08, "mode": "avg"},
+    "orange":        {"w": 0.08, "h": 0.08, "mode": "avg"},
+    "sandwich":      {"w": 0.14, "h": 0.08, "mode": "w"},
+    "broccoli":      {"w": 0.14, "h": 0.14, "mode": "avg"},
+    "carrot":        {"w": 0.04, "h": 0.18, "mode": "avg"},
+    "hot dog":       {"w": 0.18, "h": 0.07, "mode": "w"},
+    "pizza":         {"w": 0.30, "h": 0.25, "mode": "w"},
+    "donut":         {"w": 0.10, "h": 0.10, "mode": "avg"},
+    "cake":          {"w": 0.24, "h": 0.12, "mode": "w"},
 
-    # Bags & Personal Items
+    # Bags, Sports & Personal Items
     "backpack":      {"w": 0.35, "h": 0.45, "mode": "h"},
-    "umbrella":      {"w": 0.90, "h": 0.80, "mode": "w"},
-    "handbag":       {"w": 0.30, "h": 0.25, "mode": "w"},
+    "umbrella":      {"w": 0.90, "h": 0.80, "mode": "h"},
+    "handbag":       {"w": 0.30, "h": 0.25, "mode": "avg"},
     "tie":           {"w": 0.08, "h": 0.45, "mode": "h"},
     "suitcase":      {"w": 0.45, "h": 0.65, "mode": "h"},
+    "frisbee":       {"w": 0.27, "h": 0.27, "mode": "w"},
+    "skis":          {"w": 0.12, "h": 1.65, "mode": "h"},
+    "snowboard":     {"w": 0.28, "h": 1.50, "mode": "h"},
+    "sports ball":   {"w": 0.22, "h": 0.22, "mode": "avg"},
+    "kite":          {"w": 0.80, "h": 0.80, "mode": "avg"},
+    "baseball bat":  {"w": 0.07, "h": 0.85, "mode": "h"},
+    "baseball glove":{"w": 0.24, "h": 0.24, "mode": "avg"},
+    "skateboard":    {"w": 0.22, "h": 0.80, "mode": "avg"},
+    "surfboard":     {"w": 0.55, "h": 1.85, "mode": "h"},
+    "tennis racket": {"w": 0.27, "h": 0.68, "mode": "h"},
 }
 
 _IRREGULAR_PLURALS = {
@@ -239,36 +267,71 @@ def estimate_distance(
     frame_h: float,
     track_id: int = -1,
     track_history: _LRUDistanceHistory | None = None,
+    x1: float | None = None,
+    y1: float | None = None,
+    x2: float | None = None,
+    y2: float | None = None,
+    focal_factor: float = 0.75,
 ) -> dict:
     """
     Orientation-invariant calibrated monocular distance estimation:
-    - Uses max(frame_w, frame_h) so portrait (360x640) and landscape (640x360) keep equal focal length (~589px).
-    - Uses dual-axis (width + height) for perspective stability.
+    - Uses realistic lens focal factor (~0.72 mobile wide, ~0.78 webcam) scaled by long frame edge.
+    - Detects horizontal/vertical frame-edge clipping so partially cropped objects do not overestimate distance.
+    - Uses posture-aware shoulder vs body height estimation for people.
     - Smooths per-track distance via LRU EMA when track_history is provided.
     """
-    focal_px = max(frame_w, frame_h) * 0.92 if max(frame_w, frame_h) > 0 else 588.8
+    long_edge = max(frame_w, frame_h)
+    focal_px = long_edge * focal_factor if long_edge > 0 else 480.0
+
+    clipped_x = False
+    clipped_y = False
+    if None not in (x1, y1, x2, y2) and frame_w > 0 and frame_h > 0:
+        clipped_x = (x1 <= frame_w * 0.03) or (x2 >= frame_w * 0.97)
+        clipped_y = (y1 <= frame_h * 0.03) or (y2 >= frame_h * 0.97)
 
     dim = REAL_OBJECT_METRICS.get(label)
     if dim and box_w > 4 and box_h > 4:
         mode = dim["mode"]
         w_real = dim["w"]
         h_real = dim["h"]
+        dist_w = (w_real * focal_px) / box_w
+        dist_h = (h_real * focal_px) / box_h
 
         if mode == "person":
             aspect = box_h / max(box_w, 1.0)
-            if aspect < 2.0:
-                h_real = 0.88  # Upper body / seated person
-            dist_h = (h_real * focal_px) / box_h
-            dist_w = (w_real * focal_px) / box_w
-            raw_dist = (dist_h * 0.6) + (dist_w * 0.4)
-        elif mode == "w":
-            raw_dist = (w_real * focal_px) / box_w
-        elif mode == "h":
-            raw_dist = (h_real * focal_px) / box_h
+            # Outstretched arms guard when box width significantly exceeds height
+            effective_dist_w = (0.85 * focal_px) / box_w if aspect < 0.75 else dist_w
+
+            if clipped_y and not clipped_x:
+                # Legs or head cropped at frame edge: trust unclipped shoulder width
+                raw_dist = effective_dist_w
+            elif clipped_x and not clipped_y:
+                # Sides cropped: trust vertical stature
+                h_eff = 1.68 if aspect >= 1.9 else 0.95
+                raw_dist = (h_eff * focal_px) / box_h
+            elif clipped_x and clipped_y:
+                raw_dist = min(effective_dist_w, (0.95 * focal_px) / box_h)
+            elif aspect >= 1.9:
+                # Full standing body visible
+                raw_dist = (dist_h * 0.75) + (effective_dist_w * 0.25)
+            elif aspect >= 1.2:
+                # Seated / mid-frame torso
+                raw_dist = (((0.95 * focal_px) / box_h) * 0.50) + (effective_dist_w * 0.50)
+            else:
+                raw_dist = (effective_dist_w * 0.55) + (((0.95 * focal_px) / box_h) * 0.45)
         else:
-            dist_w = (w_real * focal_px) / box_w
-            dist_h = (h_real * focal_px) / box_h
-            raw_dist = (dist_w + dist_h) / 2.0
+            if clipped_x and not clipped_y:
+                raw_dist = dist_h
+            elif clipped_y and not clipped_x:
+                raw_dist = dist_w
+            elif clipped_x and clipped_y:
+                raw_dist = min(dist_w, dist_h)
+            elif mode == "w":
+                raw_dist = dist_w
+            elif mode == "h":
+                raw_dist = dist_h
+            else:
+                raw_dist = (dist_w + dist_h) / 2.0
     else:
         box_max = max(box_w, box_h)
         f_max = max(frame_w, frame_h)
@@ -304,6 +367,22 @@ class VisionSession:
         self._last_scene_time = 0.0
         self._last_emotion_time = 0.0
         self._cached_emotions: list = []
+        self._focal_factor: float = 0.75
+
+    def update_camera_config(
+        self,
+        is_mobile: bool = False,
+        facing_mode: str = "environment",
+        focal_scale: float = 1.0,
+    ):
+        """Adapt pinhole focal factor to camera lens type and optional 1m user calibration."""
+        base_factor = 0.72 if (is_mobile and facing_mode == "environment") else 0.78
+        try:
+            scale = float(focal_scale)
+        except (TypeError, ValueError):
+            scale = 1.0
+        scale = max(0.5, min(scale, 1.8))
+        self._focal_factor = base_factor * scale
 
     def _get_tracker(self):
         if self._tracker is None:
@@ -326,7 +405,6 @@ class VisionSession:
 
         for result in results:
             if result.boxes is None or len(result.boxes) == 0:
-                # Advance empty frame in tracker so stale tracks age out properly
                 try:
                     empty_boxes = result.boxes.cpu().numpy()
                     tracker.update(empty_boxes, frame)
@@ -339,7 +417,6 @@ class VisionSession:
 
             if tracks is not None and len(tracks) > 0:
                 for row in tracks:
-                    # STrack.result: [x1, y1, x2, y2, track_id, score, cls, idx]
                     x1, y1, x2, y2 = float(row[0]), float(row[1]), float(row[2]), float(row[3])
                     track_id = int(row[4])
                     confidence = float(row[5])
@@ -351,7 +428,18 @@ class VisionSession:
                     box_height = max(1.0, y2 - y1)
 
                     dist = estimate_distance(
-                        label, box_width, box_height, w, h, track_id, self._track_history
+                        label,
+                        box_width,
+                        box_height,
+                        w,
+                        h,
+                        track_id,
+                        self._track_history,
+                        x1=x1,
+                        y1=y1,
+                        x2=x2,
+                        y2=y2,
+                        focal_factor=self._focal_factor,
                     )
                     detections.append({
                         "label": label,
@@ -367,7 +455,6 @@ class VisionSession:
                         "urgency": get_urgency(dist["distance_m"]),
                     })
             else:
-                # Fallback to immediate raw detections on frame 1 or unconfirmed sudden obstacles
                 for box in result.boxes:
                     x1, y1, x2, y2 = box.xyxy[0].tolist()
                     confidence = float(box.conf[0])
@@ -379,7 +466,18 @@ class VisionSession:
                     box_height = max(1.0, y2 - y1)
 
                     dist = estimate_distance(
-                        label, box_width, box_height, w, h, -1, self._track_history
+                        label,
+                        box_width,
+                        box_height,
+                        w,
+                        h,
+                        -1,
+                        self._track_history,
+                        x1=x1,
+                        y1=y1,
+                        x2=x2,
+                        y2=y2,
+                        focal_factor=self._focal_factor,
                     )
                     detections.append({
                         "label": label,
