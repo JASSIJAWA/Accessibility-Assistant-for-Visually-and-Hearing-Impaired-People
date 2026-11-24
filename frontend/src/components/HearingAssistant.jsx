@@ -353,19 +353,19 @@ function HearingAssistant() {
     <div className="flex flex-col h-full text-sm bg-transparent">
 
       {/* ── Top Header ── */}
-      <div className="flex items-center justify-between px-4 py-3.5 border-b border-white/[0.08] flex-shrink-0 bg-white/[0.02]">
+      <div className="flex items-center justify-between px-4 py-3.5 border-b border-zinc-800/80 flex-shrink-0 bg-zinc-900/40">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl bg-purple-500/20 border border-purple-500/30 flex items-center justify-center text-lg">
+          <div className="w-8 h-8 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-lg text-zinc-300">
             🎙️
           </div>
           <div>
-            <h2 className="font-bold text-gray-100 text-xs md:text-sm flex items-center gap-2">
+            <h2 className="font-bold text-zinc-100 text-xs md:text-sm flex items-center gap-2">
               Hearing & Speech Assistant
-              <span className="text-[0.6rem] font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/35 font-mono">
+              <span className="text-[0.6rem] font-bold px-2 py-0.5 rounded-full bg-zinc-900 text-zinc-400 border border-zinc-800 font-mono">
                 Gemini Audio AI
               </span>
             </h2>
-            <p className="text-[0.65rem] text-white/40 font-medium">100% accurate verbatim captions, tone detection & two-way speech</p>
+            <p className="text-[0.65rem] text-zinc-400 font-medium">100% accurate verbatim captions, tone detection & two-way speech</p>
           </div>
         </div>
 
@@ -381,7 +381,7 @@ function HearingAssistant() {
           )}
           <button
             onClick={resetAll}
-            className="text-[0.62rem] px-2.5 py-1 rounded-lg bg-white/[0.05] hover:bg-white/[0.1] text-white/60 hover:text-white transition-colors border border-white/10 uppercase font-mono cursor-pointer"
+            className="text-[0.62rem] px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 transition-colors border border-zinc-800 uppercase font-mono cursor-pointer"
           >
             Clear
           </button>
@@ -425,7 +425,7 @@ function HearingAssistant() {
                 <ul className="space-y-1">
                   {analysis.key_points.map((pt, i) => (
                     <li key={i} className="text-xs opacity-90 flex items-start gap-1.5">
-                      <span className="text-purple-300 font-bold">•</span>
+                      <span className="text-zinc-400 font-bold">•</span>
                       <span>{pt}</span>
                     </li>
                   ))}
@@ -434,16 +434,16 @@ function HearingAssistant() {
             )}
           </div>
         ) : (
-          <div className="p-3 sm:p-3.5 rounded-2xl border border-white/[0.08] bg-white/[0.02] text-center shadow-inner">
-            <p className="text-xs text-white/50">
+          <div className="p-3 sm:p-3.5 rounded-2xl border border-zinc-800/80 bg-zinc-900/40 text-center shadow-inner">
+            <p className="text-xs text-zinc-400">
               {isRecording ? (
                 <span className="flex items-center justify-center gap-2 text-red-400 font-bold animate-pulse">
                   <span className="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-red-400 animate-ping"></span>
                   Listening ({recordSeconds}s)... Tap "Stop & Transcribe"
                 </span>
               ) : isProcessing ? (
-                <span className="flex items-center justify-center gap-2 text-purple-300 font-bold">
-                  <span className="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-purple-400 animate-ping"></span>
+                <span className="flex items-center justify-center gap-2 text-zinc-300 font-bold">
+                  <span className="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-zinc-400 animate-ping"></span>
                   Gemini Audio AI transcribing speech...
                 </span>
               ) : (
@@ -456,10 +456,10 @@ function HearingAssistant() {
 
       {/* ── Audio Visualizer Spectrum (Visible While Recording) ── */}
       {isRecording && (
-        <div className="mx-3 mt-2 px-3.5 py-2.5 rounded-xl bg-purple-950/40 border border-purple-500/40 flex items-center justify-between gap-3 flex-shrink-0 shadow-lg">
+        <div className="mx-3 mt-2 px-3.5 py-2.5 rounded-xl bg-zinc-900/90 border border-zinc-800 flex items-center justify-between gap-3 flex-shrink-0 shadow-sm">
           <div className="flex items-center gap-2 flex-shrink-0">
             <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
-            <span className="text-xs font-mono text-purple-200 font-bold">
+            <span className="text-xs font-mono text-zinc-200 font-bold">
               REC {String(Math.floor(recordSeconds / 60)).padStart(2, '0')}:{String(recordSeconds % 60).padStart(2, '0')}
             </span>
           </div>
@@ -471,14 +471,14 @@ function HearingAssistant() {
               return (
                 <div
                   key={idx}
-                  className="w-1.5 rounded-full bg-gradient-to-t from-purple-500 via-indigo-400 to-emerald-400 transition-all duration-75"
+                  className="w-1.5 rounded-full bg-gradient-to-t from-zinc-600 via-zinc-400 to-white transition-all duration-75"
                   style={{ height: `${dynamicH}%` }}
                 />
               );
             })}
           </div>
 
-          <span className="text-xs font-mono text-emerald-400 font-bold flex-shrink-0">
+          <span className="text-xs font-mono text-zinc-300 font-bold flex-shrink-0">
             {audioLevel}%
           </span>
         </div>
@@ -487,12 +487,12 @@ function HearingAssistant() {
       {/* ── Live Transcripts / Captions Feed ── */}
       <div className="flex-1 overflow-y-auto px-3.5 py-3 space-y-2.5 min-h-0">
         {transcript.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full text-white/20 text-xs text-center py-8">
-            <div className="w-12 h-12 rounded-2xl bg-white/[0.03] border border-white/5 flex items-center justify-center text-2xl mb-2">
+          <div className="flex flex-col items-center justify-center h-full text-zinc-600 text-xs text-center py-8">
+            <div className="w-12 h-12 rounded-2xl bg-zinc-900/60 border border-zinc-800/80 flex items-center justify-center text-2xl mb-2 text-zinc-500">
               💬
             </div>
-            <p className="font-semibold text-white/40">Verbatim transcripts & speech captions will appear here</p>
-            <p className="text-[0.68rem] text-white/25 mt-1 font-mono">Tap the microphone button below and speak</p>
+            <p className="font-semibold text-zinc-400">Verbatim transcripts & speech captions will appear here</p>
+            <p className="text-[0.68rem] text-zinc-500 mt-1 font-mono">Tap the microphone button below and speak</p>
           </div>
         )}
 
@@ -500,15 +500,15 @@ function HearingAssistant() {
           // Check if text has acoustic bracket sounds e.g. [horn], [siren]
           const parts = line.text.split(/(\[[^\]]+\])/g);
           return (
-            <div key={i} className="flex gap-3 items-start p-3 rounded-2xl bg-white/[0.03] border border-white/[0.06] hover:border-white/[0.12] transition-colors shadow-sm">
-              <span className="text-[0.62rem] text-purple-300 font-mono mt-0.5 flex-shrink-0 font-bold bg-purple-500/15 border border-purple-500/25 px-2 py-0.5 rounded-md">
+            <div key={i} className="flex gap-3 items-start p-3 rounded-2xl bg-zinc-900/50 border border-zinc-800/80 hover:border-zinc-700/80 transition-colors shadow-sm">
+              <span className="text-[0.62rem] text-zinc-400 font-mono mt-0.5 flex-shrink-0 font-bold bg-zinc-800/80 border border-zinc-700/80 px-2 py-0.5 rounded-md">
                 {line.time}
               </span>
-              <p className="text-xs md:text-sm text-gray-100 leading-relaxed font-sans font-medium flex-1">
+              <p className="text-xs md:text-sm text-zinc-100 leading-relaxed font-sans font-medium flex-1">
                 {parts.map((part, pIdx) => {
                   if (part.startsWith('[') && part.endsWith(']')) {
                     return (
-                      <span key={pIdx} className="inline-block mx-1 px-1.5 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/40 font-mono text-[0.75rem] font-bold">
+                      <span key={pIdx} className="inline-block mx-1 px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-300 border border-amber-500/30 font-mono text-[0.75rem] font-bold">
                         {part}
                       </span>
                     );
@@ -521,8 +521,8 @@ function HearingAssistant() {
         })}
 
         {isProcessing && (
-          <div className="flex items-center gap-2.5 text-xs text-purple-300 bg-purple-500/15 border border-purple-500/30 p-3 rounded-2xl shadow-lg">
-            <span className="w-2.5 h-2.5 rounded-full bg-purple-400 animate-ping"></span>
+          <div className="flex items-center gap-2.5 text-xs text-zinc-300 bg-zinc-900/90 border border-zinc-800 p-3 rounded-2xl shadow-sm">
+            <span className="w-2.5 h-2.5 rounded-full bg-zinc-400 animate-ping"></span>
             <span className="font-semibold">Gemini Multimodal AI transcribing speech & analyzing emotion...</span>
           </div>
         )}
@@ -538,36 +538,36 @@ function HearingAssistant() {
       )}
 
       {/* ── Two-Way Communication: Quick Speech Responses (Compact on Mobile) ── */}
-      <div className="px-2.5 sm:px-3.5 py-1.5 sm:py-2 border-t border-white/[0.06] bg-black/30 flex-shrink-0 flex items-center gap-1.5 overflow-x-auto scrollbar-none">
-        <span className="text-[0.6rem] sm:text-[0.62rem] text-white/40 font-bold uppercase font-mono flex-shrink-0">Quick TTS:</span>
+      <div className="px-2.5 sm:px-3.5 py-1.5 sm:py-2 border-t border-zinc-800/80 bg-zinc-950/70 flex-shrink-0 flex items-center gap-1.5 overflow-x-auto scrollbar-none">
+        <span className="text-[0.6rem] sm:text-[0.62rem] text-zinc-500 font-bold uppercase font-mono flex-shrink-0">Quick TTS:</span>
         <button
           onClick={() => speakReply("I am hard of hearing. Please speak clearly.")}
-          className="text-[0.65rem] sm:text-[0.68rem] px-2.5 py-1 rounded-lg bg-white/[0.05] hover:bg-white/[0.1] text-white/80 hover:text-white whitespace-nowrap border border-white/10 transition-colors cursor-pointer active:scale-95"
+          className="text-[0.65rem] sm:text-[0.68rem] px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white whitespace-nowrap border border-zinc-800 transition-colors cursor-pointer active:scale-95"
         >
           🔊 "I am hard of hearing"
         </button>
         <button
           onClick={() => speakReply("Could you please repeat that?")}
-          className="text-[0.65rem] sm:text-[0.68rem] px-2.5 py-1 rounded-lg bg-white/[0.05] hover:bg-white/[0.1] text-white/80 hover:text-white whitespace-nowrap border border-white/10 transition-colors cursor-pointer active:scale-95"
+          className="text-[0.65rem] sm:text-[0.68rem] px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white whitespace-nowrap border border-zinc-800 transition-colors cursor-pointer active:scale-95"
         >
           🔊 "Please repeat that"
         </button>
         <button
           onClick={() => speakReply("Yes, I understand. Thank you.")}
-          className="text-[0.65rem] sm:text-[0.68rem] px-2.5 py-1 rounded-lg bg-white/[0.05] hover:bg-white/[0.1] text-white/80 hover:text-white whitespace-nowrap border border-white/10 transition-colors cursor-pointer active:scale-95"
+          className="text-[0.65rem] sm:text-[0.68rem] px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white whitespace-nowrap border border-zinc-800 transition-colors cursor-pointer active:scale-95"
         >
           🔊 "Yes, I understand"
         </button>
       </div>
 
       {/* ── Main Controls (Microphone & Custom Type) ── */}
-      <div className="p-2.5 sm:p-3.5 border-t border-white/[0.08] bg-[#080816] flex-shrink-0 space-y-2 sm:space-y-2.5">
+      <div className="p-2.5 sm:p-3.5 border-t border-zinc-800/80 bg-[#0c0c0e] flex-shrink-0 space-y-2 sm:space-y-2.5">
 
         {/* Big Action Button */}
         {isRecording ? (
           <button
             onClick={stopRecording}
-            className="w-full py-3 sm:py-3.5 rounded-2xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 border border-red-400 text-white font-extrabold text-xs sm:text-sm transition-all flex items-center justify-center gap-2 shadow-[0_0_25px_rgba(239,68,68,0.5)] animate-pulse cursor-pointer active:scale-95"
+            className="w-full py-3 sm:py-3.5 rounded-2xl bg-red-600 hover:bg-red-500 border border-red-500 text-white font-bold text-xs sm:text-sm transition-all flex items-center justify-center gap-2 shadow-sm animate-pulse cursor-pointer active:scale-95"
           >
             <span className="w-2.5 h-2.5 rounded-full bg-white animate-ping" />
             <span className="tracking-wide">STOP & TRANSCRIBE ({recordSeconds}s)</span>
@@ -576,9 +576,9 @@ function HearingAssistant() {
           <button
             onClick={startRecording}
             disabled={!isConnected}
-            className="w-full py-3 sm:py-3.5 rounded-2xl bg-gradient-to-r from-purple-600 via-indigo-600 to-violet-600 hover:from-purple-500 hover:to-indigo-500 border border-purple-400/80 text-white font-extrabold text-xs sm:text-sm transition-all disabled:opacity-40 flex items-center justify-center gap-2 shadow-[0_0_25px_rgba(168,85,247,0.4)] cursor-pointer group active:scale-95"
+            className="w-full py-3 sm:py-3.5 rounded-2xl bg-white hover:bg-zinc-200 text-zinc-950 font-bold text-xs sm:text-sm transition-all disabled:opacity-40 flex items-center justify-center gap-2 shadow-sm cursor-pointer group active:scale-95"
           >
-            <span className="text-base group-hover:scale-125 transition-transform">🎙️</span>
+            <span className="text-base group-hover:scale-110 transition-transform">🎙️</span>
             <span className="tracking-wide">TAP TO SPEAK (VOICE CAPTIONS)</span>
           </button>
         )}
@@ -597,12 +597,12 @@ function HearingAssistant() {
             value={replyText}
             onChange={(e) => setReplyText(e.target.value)}
             placeholder="Type spoken dialogue or reply..."
-            className="flex-1 bg-white/[0.04] border border-white/[0.1] rounded-xl px-3 py-2 sm:px-3.5 sm:py-2.5 text-xs text-gray-100 placeholder-white/30 focus:outline-none focus:border-purple-400 focus:bg-white/[0.07] transition-all"
+            className="flex-1 bg-zinc-900/90 border border-zinc-800 rounded-xl px-3 py-2 sm:px-3.5 sm:py-2.5 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-zinc-500 focus:bg-zinc-900 transition-all"
           />
           <button
             type="submit"
             disabled={!replyText.trim()}
-            className="px-3 py-2 sm:px-3.5 sm:py-2.5 bg-purple-500/20 hover:bg-purple-500/35 disabled:opacity-30 border border-purple-500/35 text-purple-300 rounded-xl text-xs font-bold transition-colors cursor-pointer active:scale-95"
+            className="px-3 py-2 sm:px-3.5 sm:py-2.5 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 border border-zinc-700 text-zinc-200 rounded-xl text-xs font-semibold transition-colors cursor-pointer active:scale-95"
             title="Analyze as incoming speech"
           >
             Analyze
@@ -611,7 +611,7 @@ function HearingAssistant() {
             type="button"
             onClick={() => speakReply()}
             disabled={!replyText.trim()}
-            className="px-3 py-2 sm:px-3.5 sm:py-2.5 bg-emerald-500/20 hover:bg-emerald-500/35 disabled:opacity-30 border border-emerald-500/35 text-emerald-300 rounded-xl text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer active:scale-95"
+            className="px-3 py-2 sm:px-3.5 sm:py-2.5 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 border border-zinc-700 text-zinc-200 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1 cursor-pointer active:scale-95"
             title="Speak aloud through phone speaker"
           >
             <span>🔊</span> Speak

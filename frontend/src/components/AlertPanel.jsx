@@ -62,7 +62,7 @@ function AlertPanel({ visionData }) {
       icon: '👁️',
       value: String(objects.length),
       label: 'Tracked',
-      highlight: objects.length > 0 ? 'text-purple-300' : 'text-gray-400'
+      highlight: objects.length > 0 ? 'text-zinc-100' : 'text-zinc-500'
     },
     {
       icon: '📏',
@@ -74,7 +74,7 @@ function AlertPanel({ visionData }) {
       icon: emotionEmoji[dominantEmotion] || '👤',
       value: dominantEmotion,
       label: 'Emotion',
-      highlight: 'text-indigo-300'
+      highlight: 'text-zinc-300'
     },
     {
       icon: '📡',
@@ -87,20 +87,20 @@ function AlertPanel({ visionData }) {
   const borderColors = {
     info: 'border-l-emerald-400 bg-emerald-500/5',
     warning: 'border-l-amber-400 bg-amber-500/5',
-    danger: 'border-l-red-500 bg-red-500/10 shadow-[0_0_12px_rgba(239,68,68,0.15)]',
+    danger: 'border-l-red-500 bg-red-500/10',
   };
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-transparent">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.08] flex-shrink-0 bg-white/[0.02]">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800/80 flex-shrink-0 bg-zinc-900/40">
         <div className="flex items-center gap-2">
           <span className="text-base">🔔</span>
-          <h2 className="text-xs md:text-sm font-bold text-gray-100 tracking-tight">Real-Time Event Telemetry</h2>
+          <h2 className="text-xs md:text-sm font-bold text-zinc-100 tracking-tight">Real-Time Event Telemetry</h2>
         </div>
         <button
           onClick={() => setAlerts([{ id: Date.now(), type: 'info', icon: '🟢', message: 'Event log cleared', time: 'Just now' }])}
-          className="text-[0.6rem] text-white/40 hover:text-white/80 transition-colors uppercase font-mono tracking-wider cursor-pointer"
+          className="text-[0.6rem] text-zinc-500 hover:text-zinc-200 transition-colors uppercase font-mono tracking-wider cursor-pointer"
         >
           Clear Log
         </button>
@@ -109,12 +109,12 @@ function AlertPanel({ visionData }) {
       {/* Stats Quick Cards */}
       <div className="grid grid-cols-4 gap-1.5 p-3 flex-shrink-0">
         {stats.map((stat) => (
-          <div key={stat.label} className="flex flex-col items-center justify-center bg-white/[0.03] border border-white/[0.06] rounded-xl p-2 text-center">
+          <div key={stat.label} className="flex flex-col items-center justify-center bg-zinc-900/60 border border-zinc-800/80 rounded-xl p-2 text-center">
             <span className="text-base mb-0.5">{stat.icon}</span>
             <p className={`text-xs font-bold font-mono leading-tight capitalize truncate w-full ${stat.highlight}`}>
               {stat.value}
             </p>
-            <p className="text-white/30 text-[0.55rem] uppercase tracking-wider mt-0.5">{stat.label}</p>
+            <p className="text-zinc-500 text-[0.55rem] uppercase tracking-wider mt-0.5 font-mono">{stat.label}</p>
           </div>
         ))}
       </div>
@@ -122,19 +122,19 @@ function AlertPanel({ visionData }) {
       {/* Event Stream Log */}
       <div className="flex-1 px-3 pb-3 overflow-y-auto min-h-0 flex flex-col gap-1.5">
         <div className="flex items-center justify-between px-1 mb-1">
-          <h3 className="text-white/30 text-[0.62rem] uppercase tracking-widest font-bold font-mono">Live Activity Stream</h3>
+          <h3 className="text-zinc-500 text-[0.62rem] uppercase tracking-widest font-bold font-mono">Live Activity Stream</h3>
           <span className="text-[0.6rem] text-emerald-400 font-mono">● Active</span>
         </div>
 
         {alerts.map((alert) => (
           <div
             key={alert.id}
-            className={`flex items-start gap-2.5 p-2 rounded-xl border border-white/[0.05] border-l-[3px] transition-all ${borderColors[alert.type] || 'border-l-gray-500'}`}
+            className={`flex items-start gap-2.5 p-2 rounded-xl border border-zinc-800/80 border-l-[3px] bg-zinc-900/50 transition-all ${borderColors[alert.type] || 'border-l-zinc-700'}`}
           >
             <span className="text-sm flex-shrink-0 mt-0.5">{alert.icon}</span>
             <div className="flex-1 min-w-0">
-              <p className="text-gray-100 text-xs font-medium leading-relaxed truncate">{alert.message}</p>
-              <span className="text-white/30 text-[0.6rem] font-mono">{alert.time}</span>
+              <p className="text-zinc-200 text-xs font-medium leading-relaxed truncate">{alert.message}</p>
+              <span className="text-zinc-500 text-[0.6rem] font-mono">{alert.time}</span>
             </div>
           </div>
         ))}

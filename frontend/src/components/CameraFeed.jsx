@@ -602,10 +602,10 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
             <div className="flex items-center gap-1.5 sm:gap-2">
               <button
                 onClick={toggleTorch}
-                className={`p-1.5 sm:px-3 sm:py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1 backdrop-blur-md transition-all cursor-pointer ${
+                className={`p-1.5 sm:px-3 sm:py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1 backdrop-blur-md transition-all cursor-pointer ${
                   isTorchOn
-                    ? 'bg-amber-400 text-black border-amber-300 shadow-[0_0_20px_rgba(251,191,36,0.8)] animate-pulse'
-                    : 'bg-white/10 hover:bg-white/20 border-white/20 text-white'
+                    ? 'bg-amber-400 text-black border-amber-300 font-bold'
+                    : 'bg-zinc-900/80 hover:bg-zinc-800 border-zinc-700/80 text-zinc-200'
                 }`}
                 title={isTorchOn ? "Turn Flashlight OFF" : "Turn Flashlight ON"}
               >
@@ -615,7 +615,7 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
 
               <button
                 onClick={toggleCamera}
-                className="p-1.5 sm:px-3 sm:py-1.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-white text-xs font-semibold flex items-center gap-1 backdrop-blur-md transition-all cursor-pointer"
+                className="p-1.5 sm:px-3 sm:py-1.5 rounded-xl bg-zinc-900/80 hover:bg-zinc-800 border border-zinc-700/80 text-zinc-200 text-xs font-semibold flex items-center gap-1 backdrop-blur-md transition-all cursor-pointer"
                 title="Switch Camera (Rear / Front)"
               >
                 <span>🔄</span>
@@ -625,7 +625,7 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
               <button
                 onClick={handleReadText}
                 disabled={isReadingText}
-                className="p-1.5 sm:px-3 sm:py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-40 border border-blue-400 text-white text-xs font-semibold flex items-center gap-1 backdrop-blur-md transition-all shadow-lg shadow-blue-500/30 cursor-pointer"
+                className="p-1.5 sm:px-3 sm:py-1.5 rounded-xl bg-zinc-900/80 hover:bg-zinc-800 disabled:opacity-40 border border-zinc-700/80 text-zinc-200 text-xs font-semibold flex items-center gap-1 backdrop-blur-md transition-all cursor-pointer"
                 title="Read Text in Front (OCR)"
               >
                 <span>📖</span>
@@ -634,7 +634,7 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
 
               <button
                 onClick={handleToggleGuidance}
-                className="px-2.5 py-1.5 sm:px-3.5 sm:py-1.5 rounded-xl bg-red-600 hover:bg-red-500 border border-red-400 text-white text-xs font-bold flex items-center gap-1 shadow-[0_0_15px_rgba(239,68,68,0.5)] transition-all cursor-pointer"
+                className="px-2.5 py-1.5 sm:px-3.5 sm:py-1.5 rounded-xl bg-red-600/90 hover:bg-red-500 border border-red-500/80 text-white text-xs font-bold flex items-center gap-1 transition-all cursor-pointer"
                 title="Stop Guidance and Return to Dashboard"
               >
                 <span>✕</span>
@@ -646,11 +646,11 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
           {/* Center-Top Gemini Spoken Guidance HUD Banner */}
           {(detections.scene_description || spokenSubtitles) && (
             <div className="absolute top-14 sm:top-16 md:top-20 left-2 right-2 sm:left-4 sm:right-4 md:left-1/2 md:-translate-x-1/2 md:max-w-2xl z-20 pointer-events-none">
-              <div className="bg-black/90 backdrop-blur-xl border border-purple-500/50 rounded-2xl p-2.5 sm:p-3.5 md:p-4 shadow-[0_0_30px_rgba(168,85,247,0.35)] flex items-start gap-2.5">
-                <span className="text-xl sm:text-2xl flex-shrink-0 animate-pulse">🧠</span>
+              <div className="bg-zinc-950/90 backdrop-blur-xl border border-zinc-800 rounded-2xl p-2.5 sm:p-3.5 md:p-4 shadow-xl flex items-start gap-2.5">
+                <span className="text-xl sm:text-2xl flex-shrink-0">🧠</span>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between mb-0.5">
-                    <span className="text-[0.6rem] sm:text-[0.65rem] font-bold uppercase tracking-wider text-purple-300 font-mono">
+                    <span className="text-[0.6rem] sm:text-[0.65rem] font-semibold uppercase tracking-wider text-zinc-400 font-mono">
                       Gemini Live Guidance:
                     </span>
                     <span className="text-[0.6rem] text-emerald-400 font-mono flex items-center gap-1">
@@ -658,7 +658,7 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
                       Guiding
                     </span>
                   </div>
-                  <p className="text-xs sm:text-sm md:text-base font-bold text-gray-100 leading-snug tracking-wide">
+                  <p className="text-xs sm:text-sm md:text-base font-semibold text-zinc-100 leading-snug tracking-wide">
                     {detections.scene_description || spokenSubtitles}
                   </p>
                 </div>
@@ -770,13 +770,13 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
         <div className="flex flex-col h-full overflow-hidden">
 
           {/* Card Header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.08] flex-shrink-0 bg-white/[0.02]">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800/80 flex-shrink-0 bg-zinc-900/40">
             <div className="flex items-center gap-2 flex-1">
               <span className="text-lg">👁️</span>
               <div>
-                <h2 className="text-xs md:text-sm font-bold text-gray-100 flex items-center gap-2">
+                <h2 className="text-xs md:text-sm font-bold text-zinc-100 flex items-center gap-2">
                   Vision Assistant
-                  <span className="text-[0.6rem] px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 font-mono">
+                  <span className="text-[0.6rem] px-2 py-0.5 rounded-full bg-zinc-900 text-zinc-400 border border-zinc-800 font-mono">
                     YOLO11m Edge
                   </span>
                 </h2>
@@ -787,8 +787,8 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
                 onClick={toggleTorch}
                 className={`p-1.5 rounded-xl border transition-all text-xs flex items-center gap-1.5 px-3 cursor-pointer ${
                   isTorchOn
-                    ? 'bg-amber-400 text-black border-amber-300 shadow-[0_0_15px_rgba(251,191,36,0.7)] font-bold'
-                    : 'bg-white/5 border-white/10 hover:bg-white/15 text-white/80 hover:text-white'
+                    ? 'bg-amber-400 text-black border-amber-300 font-bold'
+                    : 'bg-zinc-900 hover:bg-zinc-800 border-zinc-800 text-zinc-300'
                 }`}
                 title={isTorchOn ? "Turn Flashlight OFF" : "Turn Flashlight ON"}
               >
@@ -798,16 +798,16 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
 
               <button
                 onClick={toggleCamera}
-                className="p-1.5 rounded-xl bg-white/5 border border-white/10 hover:bg-white/15 transition-all text-white/80 hover:text-white text-xs flex items-center gap-1.5 px-3 cursor-pointer"
+                className="p-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 transition-all text-zinc-300 text-xs flex items-center gap-1.5 px-3 cursor-pointer"
                 title="Switch Camera (Rear / Front)"
               >
                 <span>🔄</span>
                 <span className="hidden sm:inline font-semibold">{facingMode === 'environment' ? 'Rear' : 'Front'}</span>
               </button>
 
-              <div className="flex items-center gap-1.5 ml-1 px-2 py-1 rounded-lg bg-black/30 border border-white/10">
-                <span className={`w-2 h-2 rounded-full ${isStreaming ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]' : 'bg-gray-500'}`} />
-                <span className={`text-[0.62rem] font-bold font-mono uppercase ${isConnected ? 'text-emerald-400' : 'text-amber-400'}`}>
+              <div className="flex items-center gap-1.5 ml-1 px-2.5 py-1 rounded-lg bg-zinc-900 border border-zinc-800">
+                <span className={`w-1.5 h-1.5 rounded-full ${isStreaming ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
+                <span className={`text-[0.62rem] font-bold font-mono uppercase ${isConnected ? 'text-emerald-400' : 'text-zinc-500'}`}>
                   {isConnected ? 'ONLINE' : 'OFFLINE'}
                 </span>
               </div>
@@ -819,23 +819,23 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
 
           {/* Gemini Scene Description Bar */}
           {detections.scene_description && (
-            <div className="px-4 py-2 border-t border-purple-500/30 bg-purple-950/30 flex-shrink-0">
-              <p className="text-xs text-purple-200 leading-relaxed font-medium">
-                <span className="text-purple-400 font-bold">🧠 AI Guide:</span> {detections.scene_description}
+            <div className="px-4 py-2 border-t border-zinc-800 bg-zinc-900/60 flex-shrink-0">
+              <p className="text-xs text-zinc-300 leading-relaxed font-medium">
+                <span className="text-zinc-400 font-bold">🧠 AI Guide:</span> {detections.scene_description}
               </p>
             </div>
           )}
 
           {/* Detected Objects Chips in Card */}
           {detections.objects && detections.objects.length > 0 && (
-            <div className="px-3 py-1.5 border-t border-white/[0.08] flex items-center gap-1.5 overflow-x-auto flex-shrink-0 bg-black/30">
-              <span className="text-[0.62rem] text-white/40 uppercase font-mono font-bold mr-0.5">Objects:</span>
+            <div className="px-3 py-1.5 border-t border-zinc-800/80 flex items-center gap-1.5 overflow-x-auto flex-shrink-0 bg-black/40">
+              <span className="text-[0.62rem] text-zinc-500 uppercase font-mono font-bold mr-0.5">Objects:</span>
               {detections.objects.slice(0, 5).map((obj, i) => {
                 const tagColors = {
-                  critical: 'bg-red-500/20 text-red-200 border-red-500/50 animate-pulse',
-                  warning:  'bg-amber-500/20 text-amber-200 border-amber-500/50',
-                  info:     'bg-emerald-500/15 text-emerald-200 border-emerald-500/30',
-                  background: 'bg-gray-500/15 text-gray-300 border-gray-500/30',
+                  critical: 'bg-red-500/20 text-red-300 border-red-500/40',
+                  warning:  'bg-amber-500/20 text-amber-300 border-amber-500/40',
+                  info:     'bg-zinc-800/80 text-zinc-300 border-zinc-700/80',
+                  background: 'bg-zinc-900 text-zinc-400 border-zinc-800',
                 };
                 const tc = tagColors[obj.urgency] || tagColors.info;
                 return (
@@ -850,19 +850,19 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
           )}
 
           {/* Action Bar */}
-          <div className="p-3 border-t border-white/[0.08] bg-[#090919] flex-shrink-0 flex items-center gap-2.5">
+          <div className="p-3 border-t border-zinc-800/80 bg-[#0e0e11] flex-shrink-0 flex items-center gap-2.5">
             <button
               onClick={handleToggleGuidance}
-              className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-purple-600 via-indigo-600 to-violet-600 hover:from-purple-500 hover:to-indigo-500 border border-purple-400/80 text-white font-extrabold text-xs sm:text-sm shadow-[0_0_25px_rgba(168,85,247,0.45)] flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-95 group"
+              className="flex-1 py-3 px-4 rounded-xl bg-white hover:bg-zinc-200 text-zinc-950 font-bold text-xs sm:text-sm shadow-sm flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-95"
             >
-              <span className="text-base sm:text-lg group-hover:scale-125 transition-transform animate-pulse">🔊</span>
+              <span className="text-base sm:text-lg">🔊</span>
               <span className="tracking-wide">GUIDE ON (FULLSCREEN AI)</span>
             </button>
 
             <button
               onClick={handleReadText}
               disabled={isReadingText || !isStreaming}
-              className="px-4 py-3 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 disabled:opacity-40 border border-blue-400/80 text-white font-bold text-xs sm:text-sm shadow-[0_0_20px_rgba(59,130,246,0.35)] flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95"
+              className="px-4 py-3 rounded-xl bg-zinc-900 hover:bg-zinc-800 disabled:opacity-40 border border-zinc-700/80 text-zinc-200 font-semibold text-xs sm:text-sm flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95"
             >
               <span>📖</span>
               <span className="hidden sm:inline">{isReadingText ? 'READING...' : 'READ TEXT'}</span>
