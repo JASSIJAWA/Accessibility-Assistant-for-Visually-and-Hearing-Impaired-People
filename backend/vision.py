@@ -64,7 +64,7 @@ def _create_byte_tracker():
     from ultralytics.utils.checks import check_yaml
 
     cfg = IterableSimpleNamespace(**YAML.load(check_yaml("bytetrack.yaml")))
-    return BYTETracker(args=cfg, frame_rate=10)
+    return BYTETracker(args=cfg)
 
 
 # ─── Known real-world physical dimensions (meters) for COCO classes ──────────
@@ -421,7 +421,7 @@ class VisionSession:
                     actions=["emotion"],
                     enforce_detection=True,
                     silent=True,
-                    detector_backend="ssd",
+                    detector_backend="opencv",
                 )
 
             emotions = []

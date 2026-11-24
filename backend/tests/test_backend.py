@@ -172,3 +172,29 @@ def test_websocket_origin_guard_and_protocol():
             ws.send_text("bad-frame")
             resp = ws.receive_json()
             assert resp["error"] == "Failed to decode frame"
+
+
+def test_real_yolo_bytetrack_deepface_websocket_end_to_end():
+    """Unmocked integration test across real YOLO11m + ByteTrack + DeepFace + /ws/vision."""
+    import ultralytics
+
+    zidane_path = os.path.join(os.path.dirname(ultralytics.__file__), "assets", "zidane.jpg")
+    assert os.path.exists(zidane_path)
+    img = cv2.imread(zidane_path)
+    b64 = _encode_jpeg_b64(img)
+
+    client = TestClient(main.app)
+    with client.websocket_connect("/ws/vision") as ws:
+        # Frame 1 + Frame 2 verify ByteTrack stays isolated and tracks persist cleanly across frames
+        ws.send_text(b64)
+        r1 = ws.receive_json()
+        assert "error" not in r1
+        assert r1["object_count"] >= 1
+        assert r1["face_count"] >= 1
+        assert r1["emotions"][0]["emotion"]
+
+        ws.send_text(b64)
+        r2 = ws.receive_json()
+        assert "error" not in r2
+        assert r2["object_count"] >= 1
+        assert any(o["track_id"] != -1 for o in r2["objects"])

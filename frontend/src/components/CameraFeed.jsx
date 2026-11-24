@@ -321,9 +321,7 @@ function CameraFeed({
     if (video.readyState >= 1) {
       playStream();
     } else {
-      video.onloadedmetadata = () => {
-        playStream();
-      };
+      video.addEventListener('loadedmetadata', playStream, { once: true });
     }
   }, []);
 
