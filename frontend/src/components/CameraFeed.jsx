@@ -516,19 +516,41 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
                 width: `${((obj.box.x2 - obj.box.x1) / fs.width) * 100}%`,
                 height: `${((obj.box.y2 - obj.box.y1) / fs.height) * 100}%`,
               };
-              const urgencyColors = {
-                critical: 'border-red-500 bg-red-600/90 shadow-[0_0_15px_rgba(239,68,68,0.7)]',
-                warning:  'border-amber-400 bg-amber-500/90 shadow-[0_0_12px_rgba(245,158,11,0.6)]',
-                info:     'border-emerald-400 bg-emerald-500/80',
-                background: 'border-gray-400 bg-gray-500/70',
+              const urgencyStyles = {
+                critical: {
+                  border: 'border-red-500',
+                  badge: 'bg-red-950/90 text-red-200 border-red-500 shadow-[0_0_16px_rgba(239,68,68,0.8)]',
+                  glow: 'shadow-[0_0_20px_rgba(239,68,68,0.4)]',
+                },
+                warning: {
+                  border: 'border-amber-400',
+                  badge: 'bg-amber-950/90 text-amber-200 border-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.7)]',
+                  glow: 'shadow-[0_0_15px_rgba(245,158,11,0.3)]',
+                },
+                info: {
+                  border: 'border-emerald-400/80',
+                  badge: 'bg-emerald-950/90 text-emerald-200 border-emerald-400/70',
+                  glow: '',
+                },
+                background: {
+                  border: 'border-gray-400/60',
+                  badge: 'bg-gray-950/90 text-gray-300 border-gray-400/50',
+                  glow: '',
+                },
               };
-              const colors = urgencyColors[obj.urgency] || urgencyColors.info;
-              const [borderColor, bgColor] = colors.split(' ');
-              const distText = obj.distance_m ? `${obj.distance_m}m` : `~${obj.distance_steps}steps`;
+              const stylePreset = urgencyStyles[obj.urgency] || urgencyStyles.info;
+              const distText = obj.distance_m ? `${obj.distance_m}m` : `~${obj.distance_steps}st`;
               return (
-                <div key={`obj-${i}`} className={`absolute border-2 ${borderColor} rounded-md transition-all duration-300 ease-linear`} style={style}>
-                  <span className={`absolute -top-5 left-0 ${bgColor} text-white font-bold text-[0.62rem] md:text-[0.68rem] px-1.5 py-0.5 rounded whitespace-nowrap shadow ${facingMode === 'user' ? '-scale-x-100' : ''}`}>
-                    {obj.urgency === 'critical' ? '⚠️ ' : ''}{obj.label} • {distText} {obj.position ? `(${obj.position})` : ''}
+                <div
+                  key={`obj-${i}`}
+                  className={`absolute border-2 ${stylePreset.border} ${stylePreset.glow} rounded-lg transition-all duration-300 ease-linear pointer-events-none`}
+                  style={style}
+                >
+                  <span className={`absolute -top-6 left-0 ${stylePreset.badge} font-bold text-[0.62rem] md:text-[0.68rem] px-2 py-0.5 rounded-md whitespace-nowrap border backdrop-blur-md flex items-center gap-1 ${facingMode === 'user' ? '-scale-x-100' : ''}`}>
+                    {obj.urgency === 'critical' ? '⚠️ ' : ''}
+                    <span className="capitalize">{obj.label}</span>
+                    <span className="font-mono text-[0.65rem] opacity-90">• {distText}</span>
+                    {obj.position && <span className="opacity-70 text-[0.6rem]">({obj.position})</span>}
                   </span>
                 </div>
               );
@@ -747,43 +769,46 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
         <div className="flex flex-col h-full overflow-hidden">
 
           {/* Card Header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-white/5 flex-shrink-0">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.08] flex-shrink-0 bg-white/[0.02]">
             <div className="flex items-center gap-2 flex-1">
               <span className="text-lg">👁️</span>
-              <h2 className="text-sm font-semibold text-gray-200">Vision Assistant</h2>
+              <div>
+                <h2 className="text-xs md:text-sm font-bold text-gray-100 flex items-center gap-2">
+                  Vision Assistant
+                  <span className="text-[0.6rem] px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 font-mono">
+                    YOLO11m Edge
+                  </span>
+                </h2>
+              </div>
             </div>
             <div className="flex items-center gap-2">
               <button
                 onClick={toggleTorch}
-                className={`p-1.5 rounded-lg border transition-colors text-xs flex items-center gap-1 px-2.5 cursor-pointer ${
+                className={`p-1.5 rounded-xl border transition-all text-xs flex items-center gap-1.5 px-3 cursor-pointer ${
                   isTorchOn
-                    ? 'bg-amber-400 text-black border-amber-300 shadow-[0_0_12px_rgba(251,191,36,0.6)] font-bold'
-                    : 'bg-white/5 border-white/10 hover:bg-white/10 text-white'
+                    ? 'bg-amber-400 text-black border-amber-300 shadow-[0_0_15px_rgba(251,191,36,0.7)] font-bold'
+                    : 'bg-white/5 border-white/10 hover:bg-white/15 text-white/80 hover:text-white'
                 }`}
                 title={isTorchOn ? "Turn Flashlight OFF" : "Turn Flashlight ON"}
               >
                 <span>🔦</span>
-                <span className="hidden sm:inline">{isTorchOn ? 'LIGHT ON' : 'Torch'}</span>
+                <span className="hidden sm:inline font-semibold">{isTorchOn ? 'LIGHT ON' : 'Torch'}</span>
               </button>
 
               <button
                 onClick={toggleCamera}
-                className="p-1.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition-colors text-white text-xs flex items-center gap-1 px-2.5 cursor-pointer"
-                title="Switch Camera"
+                className="p-1.5 rounded-xl bg-white/5 border border-white/10 hover:bg-white/15 transition-all text-white/80 hover:text-white text-xs flex items-center gap-1.5 px-3 cursor-pointer"
+                title="Switch Camera (Rear / Front)"
               >
                 <span>🔄</span>
-                <span className="hidden sm:inline">{facingMode === 'environment' ? 'Rear' : 'Front'}</span>
+                <span className="hidden sm:inline font-semibold">{facingMode === 'environment' ? 'Rear' : 'Front'}</span>
               </button>
 
-              <div className="flex items-center gap-1.5 ml-1">
-                <span className={`text-[0.6rem] px-2 py-0.5 rounded-full font-medium ${
-                  isConnected
-                    ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                    : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                }`}>
-                  {isConnected ? 'AI Online' : 'AI Offline'}
+              <div className="flex items-center gap-1.5 ml-1 px-2 py-1 rounded-lg bg-black/30 border border-white/10">
+                <span className={`w-2 h-2 rounded-full ${isStreaming ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]' : 'bg-gray-500'}`} />
+                <span className={`text-[0.62rem] font-bold font-mono uppercase ${isConnected ? 'text-emerald-400' : 'text-amber-400'}`}>
+                  {isConnected ? 'ONLINE' : 'OFFLINE'}
                 </span>
-                <span className={`w-2.5 h-2.5 rounded-full ${isStreaming ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.5)]' : 'bg-gray-600'}`} />
               </div>
             </div>
           </div>
@@ -793,27 +818,30 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
 
           {/* Gemini Scene Description Bar */}
           {detections.scene_description && (
-            <div className="px-4 py-2 border-t border-indigo-500/20 bg-indigo-500/5 flex-shrink-0">
-              <p className="text-xs text-indigo-200 leading-relaxed">
-                <span className="text-indigo-400 font-semibold">🧠 AI Guide:</span> {detections.scene_description}
+            <div className="px-4 py-2 border-t border-purple-500/30 bg-purple-950/30 flex-shrink-0">
+              <p className="text-xs text-purple-200 leading-relaxed font-medium">
+                <span className="text-purple-400 font-bold">🧠 AI Guide:</span> {detections.scene_description}
               </p>
             </div>
           )}
 
           {/* Detected Objects Chips in Card */}
           {detections.objects && detections.objects.length > 0 && (
-            <div className="px-3 py-1.5 border-t border-white/5 flex items-center gap-1.5 overflow-x-auto flex-shrink-0 bg-black/20">
+            <div className="px-3 py-1.5 border-t border-white/[0.08] flex items-center gap-1.5 overflow-x-auto flex-shrink-0 bg-black/30">
+              <span className="text-[0.62rem] text-white/40 uppercase font-mono font-bold mr-0.5">Objects:</span>
               {detections.objects.slice(0, 5).map((obj, i) => {
                 const tagColors = {
-                  critical: 'bg-red-500/15 text-red-300 border-red-500/30',
-                  warning:  'bg-amber-500/15 text-amber-300 border-amber-500/30',
-                  info:     'bg-emerald-500/10 text-emerald-300 border-emerald-500/20',
-                  background: 'bg-gray-500/10 text-gray-400 border-gray-500/20',
+                  critical: 'bg-red-500/20 text-red-200 border-red-500/50 animate-pulse',
+                  warning:  'bg-amber-500/20 text-amber-200 border-amber-500/50',
+                  info:     'bg-emerald-500/15 text-emerald-200 border-emerald-500/30',
+                  background: 'bg-gray-500/15 text-gray-300 border-gray-500/30',
                 };
                 const tc = tagColors[obj.urgency] || tagColors.info;
                 return (
-                  <span key={`tag-${i}`} className={`text-[0.65rem] px-2 py-0.5 ${tc} rounded-md whitespace-nowrap border`}>
-                    {obj.urgency === 'critical' ? '⚠️ ' : ''}{obj.label} {obj.distance_m ? `${obj.distance_m}m` : ''} {obj.position ? `(${obj.position})` : ''}
+                  <span key={`tag-${i}`} className={`text-[0.65rem] font-semibold px-2 py-0.5 ${tc} rounded-lg whitespace-nowrap border flex items-center gap-1`}>
+                    {obj.urgency === 'critical' && <span>⚠️</span>}
+                    <span>{obj.label}</span>
+                    <span className="font-mono opacity-80">{obj.distance_m ? `${obj.distance_m}m` : ''}</span>
                   </span>
                 );
               })}
@@ -821,19 +849,19 @@ function CameraFeed({ onDetectionUpdate, isActive = true, isGuidanceActive = fal
           )}
 
           {/* Action Bar */}
-          <div className="px-4 py-3 border-t border-white/10 bg-[#0c0c22] flex-shrink-0 flex items-center gap-2.5">
+          <div className="p-3 border-t border-white/[0.08] bg-[#090919] flex-shrink-0 flex items-center gap-2.5">
             <button
               onClick={handleToggleGuidance}
-              className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-amber-600 via-orange-600 to-amber-700 hover:from-amber-500 hover:to-orange-500 border border-amber-400 text-white font-bold text-xs sm:text-sm shadow-[0_0_20px_rgba(245,158,11,0.35)] flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-95"
+              className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-purple-600 via-indigo-600 to-violet-600 hover:from-purple-500 hover:to-indigo-500 border border-purple-400/80 text-white font-extrabold text-xs sm:text-sm shadow-[0_0_25px_rgba(168,85,247,0.45)] flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-95 group"
             >
-              <span className="text-base sm:text-lg">🔊</span>
-              <span>GUIDE ON (FULLSCREEN AI)</span>
+              <span className="text-base sm:text-lg group-hover:scale-125 transition-transform animate-pulse">🔊</span>
+              <span className="tracking-wide">GUIDE ON (FULLSCREEN AI)</span>
             </button>
 
             <button
               onClick={handleReadText}
               disabled={isReadingText || !isStreaming}
-              className="px-4 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-40 border border-blue-400 text-white font-bold text-xs sm:text-sm shadow-[0_0_15px_rgba(59,130,246,0.3)] flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+              className="px-4 py-3 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 disabled:opacity-40 border border-blue-400/80 text-white font-bold text-xs sm:text-sm shadow-[0_0_20px_rgba(59,130,246,0.35)] flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95"
             >
               <span>📖</span>
               <span className="hidden sm:inline">{isReadingText ? 'READING...' : 'READ TEXT'}</span>
