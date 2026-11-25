@@ -3,10 +3,18 @@
 
 $ErrorActionPreference = "Stop"
 
+$NoBrowser = ($args -contains "--no-browser") -or ($args -contains "-NoBrowser")
 $RootDir = $PSScriptRoot
 $BackendDir = Join-Path $RootDir "backend"
 $FrontendDir = Join-Path $RootDir "frontend"
 $PythonExe = Join-Path $BackendDir "venv\Scripts\python.exe"
+
+if (-not (Get-Command npx -ErrorAction SilentlyContinue)) {
+    $nodeDir = "C:\Program Files\nodejs"
+    if (Test-Path (Join-Path $nodeDir "npx.cmd")) {
+        $env:Path = "$nodeDir;$env:Path"
+    }
+}
 
 if (-not (Test-Path $PythonExe)) {
     Write-Host "[ERROR] Backend virtualenv python not found at: $PythonExe" -ForegroundColor Red
@@ -36,6 +44,27 @@ function Test-BackendHealthy {
     }
 }
 
+function Wait-ForNetwork {
+    param([int]$TimeoutSeconds = 45)
+    for ($i = 0; $i -lt $TimeoutSeconds; $i++) {
+        $tcp = $null
+        try {
+            $tcp = New-Object System.Net.Sockets.TcpClient
+            $ar = $tcp.BeginConnect("api.cloudflare.com", 443, $null, $null)
+            if ($ar.AsyncWaitHandle.WaitOne(1500, $false) -and $tcp.Connected) {
+                $tcp.EndConnect($ar)
+                return $true
+            }
+        } catch {
+            # Still connecting Wi-Fi / DNS after boot
+        } finally {
+            if ($null -ne $tcp) { $tcp.Dispose() }
+        }
+        Start-Sleep -Seconds 1
+    }
+    return $false
+}
+
 try {
     Write-Host "========================================" -ForegroundColor Cyan
     Write-Host "   AVHA - Starting Live Deployment      " -ForegroundColor Cyan
@@ -44,9 +73,9 @@ try {
 
     # 1. Ensure FastAPI backend is running on 127.0.0.1:8000
     if (Test-BackendHealthy) {
-        Write-Host "[1/3] Backend already healthy on http://127.0.0.1:8000" -ForegroundColor Green
+        Write-Host "[1/4] Backend already healthy on http://127.0.0.1:8000" -ForegroundColor Green
     } else {
-        Write-Host "[1/3] Starting FastAPI backend..." -ForegroundColor Yellow
+        Write-Host "[1/4] Starting FastAPI backend..." -ForegroundColor Yellow
         $BackendOutLog = Join-Path $env:TEMP "avha-backend.out.log"
         $BackendErrLog = Join-Path $env:TEMP "avha-backend.err.log"
         $BackendProc = Start-Process -FilePath $PythonExe `
@@ -72,11 +101,19 @@ try {
             Write-Host "[ERROR] Backend did not become healthy within 30s." -ForegroundColor Red
             exit 1
         }
-        Write-Host "[1/3] Backend healthy!" -ForegroundColor Green
+        Write-Host "[1/4] Backend healthy!" -ForegroundColor Green
     }
 
-    # 2. Start Cloudflare Quick Tunnel and capture its *.trycloudflare.com URL
-    Write-Host "[2/3] Starting Cloudflare Quick Tunnel..." -ForegroundColor Yellow
+    # 2. Wait for Wi-Fi / internet connectivity (critical when run at Windows boot)
+    Write-Host "[2/4] Checking internet connectivity..." -ForegroundColor Yellow
+    if (-not (Wait-ForNetwork -TimeoutSeconds 45)) {
+        Write-Host "[ERROR] No internet connection after 45s. Cannot open Cloudflare tunnel." -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "[2/4] Network connected!" -ForegroundColor Green
+
+    # 3. Start Cloudflare Quick Tunnel and capture its *.trycloudflare.com URL
+    Write-Host "[3/4] Starting Cloudflare Quick Tunnel..." -ForegroundColor Yellow
     $TunnelOutLog = Join-Path $env:TEMP "avha-cloudflared.out.log"
     $TunnelErrLog = Join-Path $env:TEMP "avha-cloudflared.err.log"
     Remove-Item $TunnelOutLog, $TunnelErrLog -ErrorAction SilentlyContinue
@@ -91,7 +128,7 @@ try {
     for ($i = 0; $i -lt 60; $i++) {
         Start-Sleep -Milliseconds 500
         if ($TunnelProc.HasExited) {
-            Write-Host "[ERROR] cloudflared exited early." -ForegroundColor Red
+            Write-Host "[ERROR] cloudflared exited early. Check $TunnelErrLog" -ForegroundColor Red
             exit 1
         }
         foreach ($logPath in @($TunnelErrLog, $TunnelOutLog)) {
@@ -119,10 +156,10 @@ try {
     }
 
     $WssUrl = $TunnelUrl -replace '^https://', 'wss://'
-    Write-Host "[2/3] Tunnel ready: $TunnelUrl" -ForegroundColor Green
+    Write-Host "[3/4] Tunnel ready: $TunnelUrl" -ForegroundColor Green
 
-    # 3. Redeploy Vercel production frontend pointing to the new tunnel URL
-    Write-Host "[3/3] Updating Vercel production frontend (avha-assistant)..." -ForegroundColor Yellow
+    # 4. Redeploy Vercel production frontend pointing to the new tunnel URL
+    Write-Host "[4/4] Updating Vercel production frontend (avha-assistant)..." -ForegroundColor Yellow
     Push-Location $FrontendDir
     $prevEap = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
@@ -145,7 +182,9 @@ try {
     Write-Host "========================================" -ForegroundColor Green
     Write-Host "Keep this window open while using AVHA. Press Ctrl+C to stop." -ForegroundColor Cyan
 
-    Start-Process "https://avha-assistant.vercel.app" | Out-Null
+    if (-not $NoBrowser) {
+        Start-Process "https://avha-assistant.vercel.app" | Out-Null
+    }
 
     while (-not $TunnelProc.HasExited) {
         if ($null -ne $BackendProc -and $BackendProc.HasExited) {
